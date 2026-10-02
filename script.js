@@ -1956,9 +1956,8 @@ function buildRows(){
       ]);
     });
   });
-  // упражнения без записей — чтобы при загрузке восстановился и список
-  const used=new Set(DB.records.map(r=>r.exId));
-  DB.exercises.filter(e=>!used.has(e.id)).forEach(e=>rows.push(['','','','',e.name,'','','','','','','','','']));
+  // только реальные записи; упражнения без записей (например, из программ) сюда не попадают —
+  // они сохраняются в полной копии и в выгрузке программ
   return rows;
 }
 function buildProgramRows(progs){
