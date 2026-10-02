@@ -1,0 +1,352 @@
+:root{
+  --bg:#0f1115; --card:#1a1d24; --card2:#232833; --txt:#e8eaed;
+  --muted:#8b93a7; --accent:#4f8cff; --ok:#37c26e; --warn:#ffb020; --bad:#ff5470;
+  --border:#2b3140;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --nav-h: 60px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  font-size:16px;overscroll-behavior-y:contain;-webkit-text-size-adjust:100%}
+/* Каркас приложения: сама страница не прокручивается, листается только .scroller,
+   а нижнее меню — обычный блок внизу колонки. Так iOS в режиме «с экрана Домой»
+   не может «приподнять» меню (это баг закреплённых элементов до первой прокрутки). */
+html,body{height:100%;height:var(--app-h,100%);overflow:hidden}
+html{background:var(--bg)}
+body{display:flex;flex-direction:column}
+.scroller{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;padding-bottom:24px}
+button{font-family:inherit;touch-action:manipulation}
+.btn,.chip,.icon-btn,.nav button,.seg button,.stepper button{-webkit-user-select:none;user-select:none}
+
+/* ---------- верхняя панель ---------- */
+.topbar{
+  position:sticky;top:0;z-index:20;
+  background:rgba(15,17,21,.92);
+  backdrop-filter:saturate(180%) blur(12px);
+  -webkit-backdrop-filter:saturate(180%) blur(12px);
+  border-bottom:1px solid var(--border);
+  padding-top:var(--safe-top);
+  display:flex;align-items:center;gap:10px;
+  min-height:calc(52px + var(--safe-top));
+  padding-left:16px;padding-right:12px;
+}
+.topbar-title{flex:1;min-width:0;font-size:17px;font-weight:700;letter-spacing:.3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.icon-btn{
+  flex:none;background:var(--card2);border:none;color:var(--txt);
+  width:38px;height:38px;border-radius:50%;
+  font-size:20px;font-weight:600;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-family:inherit;padding:0;
+}
+.icon-btn:active{opacity:.6}
+.icon-btn.on{background:var(--ok);color:#fff}
+
+/* ---------- базовые элементы ---------- */
+.container{padding:14px 16px 20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:14px;margin-bottom:12px}
+.muted{color:var(--muted);font-size:13px}
+h2{font-size:18px;margin:4px 0 10px}
+input,select,textarea{
+  width:100%;background:var(--card2);color:var(--txt);
+  border:1px solid var(--border);border-radius:10px;
+  padding:12px 14px;font-size:16px;outline:none;font-family:inherit;
+  -webkit-appearance:none;appearance:none;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+input::placeholder,textarea::placeholder{color:#5d6478}
+select{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238b93a7' stroke-width='2'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 14px center;padding-right:36px;
+}
+input[type=datetime-local]{min-height:48px;display:block;text-align:left}
+input::-webkit-date-and-time-value{text-align:left}
+input[type=search]::-webkit-search-decoration{-webkit-appearance:none}
+textarea{min-height:90px;resize:vertical;font-family:inherit}
+label{display:block;font-size:12px;color:var(--muted);margin:12px 0 5px;
+  text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hidden{display:none!important}
+.empty{text-align:center;color:var(--muted);padding:40px 10px;font-size:15px;line-height:1.5}
+.note{color:var(--warn);font-style:italic}
+
+/* ---------- кнопки ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  background:var(--accent);color:#fff;border:none;border-radius:10px;
+  padding:12px 16px;font-size:15px;font-weight:600;cursor:pointer;
+  font-family:inherit;-webkit-appearance:none;text-align:center}
+.btn:active{opacity:.7}
+.btn.ghost{background:var(--card2);color:var(--txt)}
+.btn.danger{background:var(--bad);color:#fff}
+.btn.ok{background:var(--ok)}
+.btn.sm{padding:8px 12px;font-size:13px;border-radius:8px}
+.btn.big{display:flex;padding:15px;font-size:16px;width:100%;margin-top:10px}
+.form-actions{display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:16px}
+.form-actions .btn{padding:15px;font-size:16px}
+
+/* ---------- форма записи ---------- */
+.form-card{padding:16px}
+.autocomplete{position:relative}
+.suggest{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:10px;max-height:260px;overflow-y:auto;z-index:50;
+  display:none;box-shadow:0 10px 30px rgba(0,0,0,.45);
+  -webkit-overflow-scrolling:touch;
+}
+.suggest.show{display:block}
+.suggest-item{padding:12px 14px;cursor:pointer;font-size:15px;
+  border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px}
+.suggest-item:last-child{border-bottom:none}
+.suggest-item:active{background:var(--card)}
+.suggest-item .hint{color:var(--muted);font-size:12px;flex:none;align-self:center}
+.suggest-item.create{color:var(--ok)}
+
+.stepper{display:flex;align-items:stretch;background:var(--card2);
+  border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.stepper:focus-within{border-color:var(--accent)}
+.stepper input{border:none;border-radius:0;background:transparent;text-align:center;
+  padding:12px 2px;min-width:0;flex:1}
+.stepper button{flex:none;width:38px;background:none;border:none;color:var(--accent);
+  font-size:22px;font-weight:600;cursor:pointer;padding:0}
+.stepper button:active{background:rgba(255,255,255,.07)}
+
+.hint-card{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.28);
+  border-radius:10px;padding:10px 12px;margin-top:10px}
+.hint-val{font-weight:600;margin:2px 0;font-variant-numeric:tabular-nums}
+.hint-card .btn{flex:none}
+
+/* ---------- таймеры ---------- */
+.timer-bar{
+  background:linear-gradient(135deg,#1a3a5c,#1f2a3d);
+  border:1px solid #2b4a72;border-radius:14px;
+  padding:12px 14px;margin-bottom:12px;
+}
+.timer-row,.rest-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.timer-display{display:flex;flex-direction:column}
+.timer-label{font-size:11px;color:#9ec4ff;text-transform:uppercase;
+  letter-spacing:.6px;font-weight:700}
+.timer-label.rest{color:#ffcf80}
+.timer-time{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff}
+.timer-time.rest{color:#ffb020}
+.timer-sub{font-size:12px;color:#9ec4ff;margin-top:2px}
+.rest-block{
+  background:linear-gradient(135deg,#4a2a1a,#3d2a1f);
+  border:1px solid #72502b;border-radius:14px;
+  padding:12px 14px;margin-bottom:12px;
+}
+.rest-btns{display:flex;gap:6px}
+.progress{height:6px;background:rgba(0,0,0,.4);border-radius:4px;
+  overflow:hidden;margin-top:8px}
+.progress > div{height:100%;background:#ffb020;transition:width .25s linear}
+body.flash .container{animation:flash 1.2s ease-out}
+@keyframes flash{0%,40%{background:rgba(255,176,32,.16)}100%{background:transparent}}
+
+.chips{display:flex;flex-wrap:nowrap;gap:6px}
+.chip{background:var(--card2);border:1px solid var(--border);
+  border-radius:20px;padding:10px 4px;font-size:15px;font-weight:600;
+  cursor:pointer;flex:1 1 0;min-width:0;text-align:center;white-space:nowrap}
+.chip:active{opacity:.6}
+
+/* ---------- списки записей ---------- */
+.section-head{display:flex;justify-content:space-between;align-items:baseline;
+  margin:20px 2px 8px;font-weight:700;font-size:16px}
+.list-card{padding:0;overflow:hidden}
+.rec-row{display:flex;align-items:center;gap:10px;padding:12px 14px;
+  border-bottom:1px solid var(--border);cursor:pointer}
+.rec-row:last-child{border-bottom:none}
+.rec-row:active{background:var(--card2)}
+.rec-main{flex:1;min-width:0}
+.rec-name{font-weight:600;font-size:15px}
+.rec-desc{font-size:14px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.rec-side{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;flex:none;text-align:right}
+.list-day{padding:8px 14px;font-size:12px;font-weight:700;color:var(--accent);
+  background:var(--card2);text-transform:uppercase;letter-spacing:.4px;
+  border-bottom:1px solid var(--border)}
+
+/* ---------- упражнения ---------- */
+.search{margin-bottom:12px}
+.ex-item{
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:13px 16px;margin-bottom:8px;cursor:pointer;
+  display:flex;justify-content:space-between;align-items:center;gap:10px;
+}
+.ex-item:active{opacity:.6}
+.ex-text{min-width:0}
+.ex-item .name{font-weight:600}
+.ex-item .count{color:var(--muted);font-size:12px;margin-top:3px}
+.chev{color:var(--muted);flex:none;display:flex}
+.chev .i{width:20px;height:20px}
+
+.spark svg{width:100%;height:70px;display:block;margin:6px 0 4px}
+.spark-range{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+
+/* ---------- статистика ---------- */
+.data-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.data-row .btn{padding:10px 12px;font-size:14px}
+.warn-line{background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.35);
+  color:#ffcf80;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;cursor:pointer}
+.warn-box{background:rgba(255,84,112,.08);border:1px solid rgba(255,84,112,.35);
+  border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0;line-height:1.45}
+
+.stats-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.stats-box{background:var(--card);border:1px solid var(--border);
+  border-radius:12px;padding:12px}
+.stats-box .val{font-size:20px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+.stats-box .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.sheet .stats-box{background:var(--card2)}
+.sheet .stats-box .val{font-size:17px}
+
+.seg{display:flex;background:var(--card2);border-radius:10px;padding:3px;margin-bottom:12px}
+.seg button{flex:1;background:none;border:none;color:var(--muted);padding:9px;
+  border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
+.seg button.active{background:var(--card);color:var(--txt);box-shadow:0 1px 3px rgba(0,0,0,.35)}
+
+.month-head{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.5px;margin:18px 2px 8px}
+.month-head:first-child{margin-top:4px}
+.workout-card{background:var(--card);border:1px solid var(--border);
+  border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer}
+.workout-card:active{opacity:.7}
+.workout-card.live{border-color:var(--ok)}
+.workout-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.workout-date{font-weight:700;color:var(--accent);font-size:15px}
+.workout-num{color:var(--muted);font-size:13px;font-weight:600}
+.workout-ex{font-size:14px;margin:5px 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workout-meta{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.badge{background:var(--ok);color:#fff;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700}
+
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.filters select{padding:10px 30px 10px 12px;background-position:right 10px center}
+
+.log-table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);
+  border:1px solid var(--border);border-radius:12px;overflow:hidden;font-size:14px}
+.log-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;
+  color:var(--muted);font-weight:700;padding:10px 6px;background:var(--card2);
+  border-bottom:1px solid var(--border)}
+.log-table td{padding:9px 6px;border-bottom:1px solid var(--border);vertical-align:top}
+.log-table tr:last-child td{border-bottom:none}
+.log-table th:first-child,.log-table td:first-child{padding-left:12px}
+.log-table th:last-child,.log-table td:last-child{padding-right:12px}
+.log-table .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.log-table tr.grp td{background:rgba(79,140,255,.10);font-size:13px;padding-top:8px;padding-bottom:8px;cursor:pointer}
+.log-table tr.grp b{color:var(--accent)}
+.log-table tr.grp .muted{font-size:12px}
+.log-table tbody tr{cursor:pointer}
+.log-table tbody tr:active td{background:var(--card2)}
+.t-name{font-weight:600}
+.t-sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+/* ---------- детали тренировки ---------- */
+.ex-block{margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.ex-block-title{display:flex;justify-content:space-between;gap:8px;font-weight:600;font-size:15px;margin-bottom:4px}
+.set-line{font-size:14px;color:var(--txt);padding:7px 0;cursor:pointer;
+  font-variant-numeric:tabular-nums}
+.set-line:active{opacity:.6}
+.set-line .num{color:var(--muted);margin-right:8px}
+.set-line .note{margin-left:6px}
+
+/* ---------- нижнее меню ---------- */
+.nav{
+  position:relative;flex:none;z-index:30;
+  background:rgba(18,21,27,.94);
+  backdrop-filter:saturate(180%) blur(12px);
+  -webkit-backdrop-filter:saturate(180%) blur(12px);
+  border-top:1px solid var(--border);
+  display:flex;
+  padding-bottom:var(--safe-bottom);
+}
+.nav button{
+  flex:1;background:none;border:none;color:var(--muted);
+  padding:10px 4px 8px;font-size:11px;font-weight:600;
+  cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;
+  font-family:inherit;
+}
+.nav button.active{color:var(--accent)}
+.nav .ico{width:24px;height:24px}
+
+/* ---------- модалка (нижний лист) ---------- */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;
+  display:none;align-items:flex-end}
+.modal.show{display:flex}
+.modal .sheet{
+  background:var(--card);width:100%;max-height:90vh;max-height:90dvh;overflow:auto;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  border-radius:20px 20px 0 0;
+  padding:20px 18px calc(20px + var(--safe-bottom));
+  animation:slideUp .2s ease-out;
+}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+.sheet-head h2{margin:0}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+
+/* ---------- диалог подтверждения ---------- */
+.dialog{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.55);
+  display:none;align-items:center;justify-content:center;padding:24px}
+.dialog.show{display:flex}
+.dialog-box{background:var(--card);border:1px solid var(--border);border-radius:16px;
+  padding:18px;width:100%;max-width:340px;animation:pop .15s ease-out}
+.dialog-text{font-size:15px;line-height:1.45;margin-bottom:16px}
+.dialog-btns{display:flex;gap:8px}
+.dialog-btns .btn{flex:1}
+@keyframes pop{from{transform:scale(.94);opacity:0}to{transform:none;opacity:1}}
+
+/* ---------- всплывающее сообщение ---------- */
+.toast{position:fixed;left:12px;right:12px;
+  bottom:calc(var(--nav-h) + 12px + var(--safe-bottom));z-index:150;
+  background:#2a3040;border:1px solid #3a4256;color:var(--txt);border-radius:12px;
+  padding:12px 14px;display:flex;align-items:center;gap:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);
+  transform:translateY(20px);opacity:0;pointer-events:none;transition:transform .2s,opacity .2s}
+.toast.show{transform:none;opacity:1;pointer-events:auto}
+.toast span{flex:1;font-size:15px}
+.toast-btn{background:none;border:none;color:var(--accent);font-weight:700;font-size:15px;
+  padding:4px 6px;cursor:pointer;flex:none}
+
+/* ---------- загрузка файла ---------- */
+.file-btn{position:relative;overflow:hidden}
+.file-btn input{position:absolute;inset:0;width:100%;height:100%;opacity:0;
+  font-size:100px;cursor:pointer;padding:0;border:none}
+
+/* ---------- иконки ---------- */
+.i{width:18px;height:18px;flex:none;display:inline-block;vertical-align:-3px}
+.i.sm{width:14px;height:14px;vertical-align:-2px;margin-right:4px;opacity:.85}
+.i.pr{color:var(--warn);width:16px;height:16px}
+.icon-btn .i{width:20px;height:20px}
+.stepper .i{width:18px;height:18px;vertical-align:middle}
+.toast-ico{color:var(--accent);width:20px;height:20px}
+.warn-line{display:flex;gap:8px;align-items:flex-start}
+.warn-line .i{margin-top:1px}
+.suggest-item.create .i{vertical-align:-3px}
+
+/* ---------- цвета иконок ---------- */
+.ic-clock,.ic-timer{color:#4f8cff}
+.ic-pause{color:#ffb020}
+.ic-dumbbell{color:#37c26e}
+.ic-trophy{color:#ffd166}
+.ic-trash{color:#ff5470}
+.ic-pen,.ic-edit{color:#7aa7ff}
+.ic-upload,.ic-repeat{color:#3ccfcf}
+.ic-download,.ic-chart{color:#b48cff}
+.ic-copy{color:#9ec4ff}
+.ic-folder{color:#ffcf5c}
+.ic-swap{color:#ff8a5c}
+.ic-plus,.ic-check,.ic-play,.ic-flag{color:#37c26e}
+.ic-bell,.ic-alert{color:#ffb020}
+.ic-save{color:#fff}
+.ic-x,.ic-back,.ic-more,.ic-chev{color:var(--muted)}
+.stepper .i{color:var(--accent)}
+/* на залитых кнопках иконки белые, чтобы не сливались с фоном */
+.btn:not(.ghost) .i,.icon-btn.on .i{color:#fff}
+.nav button .i{opacity:.5;transition:opacity .15s}
+.nav button.active .i{opacity:1}
+.stats-box .lbl .i.sm{opacity:1}
+
+/* ---------- поле вне пределов ---------- */
+input.bad,.stepper.bad{border-color:var(--bad)!important;background-color:rgba(255,84,112,.10)}
+.stepper.bad input{background:transparent;border:none!important}

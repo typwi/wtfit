@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Тренировки">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="theme-color" content="#0f1115">
+<title>Фитнес-трекер</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-dumbbell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M9 16v-4M13.5 16V8M18 16v-6"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 10v3.5l2 1.5M10 2.5h4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M4 14.5V19a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-4.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5V15M7.5 10.5 12 15l4.5-4.5"/><path d="M4 14.5V19a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-4.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M9 6.5V4h6v2.5M6.5 6.5l1 13.5h9l1-13.5M10 10.5v6M14 10.5v6"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l3 3-3 3"/><path d="M4 11V9.5A3.5 3.5 0 0 1 7.5 6H20"/><path d="M7 21l-3-3 3-3"/><path d="M20 13v1.5a3.5 3.5 0 0 1-3.5 3.5H4"/></symbol>
+  <symbol id="i-trophy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 16.5V21M7 4h10v5a5 5 0 0 1-10 0Z"/><path d="M17 5.5h2.5V7a3 3 0 0 1-3 3M7 5.5H4.5V7a3 3 0 0 0 3 3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10 9v6M14 9v6"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9"/><path d="M10.3 20.5a2 2 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14l11-7Z"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4.5h12l-2.5 4 2.5 4H5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 16.5h.01"/><path d="M10.3 4.2 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4l2 2h8A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1L20.5 8.5"/><path d="M20.5 3.5v5h-5"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M8 3.5v5h7v-5M8 20.5v-6h8v6"/></symbol>
+</svg>
+
+<div class="scroller" id="scroller">
+
+<!-- ============ ЭКРАН ЗАПИСИ ============ -->
+<section id="view-record" class="view">
+  <header class="topbar">
+    <div class="topbar-title">Запись</div>
+    <button class="icon-btn" id="btnTimer" data-act="timer-start" aria-label="Начать тренировку"><svg class="i ic-timer" aria-hidden="true"><use href="#i-timer"></use></svg></button>
+  </header>
+
+  <main class="container">
+    <div class="timer-bar hidden" id="timerBar">
+      <div class="timer-row">
+        <div class="timer-display">
+          <span class="timer-label">Тренировка</span>
+          <span class="timer-time" id="workoutTime">00:00</span>
+          <span class="timer-sub" id="workoutSub"></span>
+        </div>
+        <button class="btn ghost sm" data-act="timer-stop">Стоп</button>
+      </div>
+    </div>
+
+    <div class="rest-block hidden" id="restBlock">
+      <div class="rest-row">
+        <div class="timer-display">
+          <span class="timer-label rest">Отдых</span>
+          <span class="timer-time rest" id="restTime">00:00</span>
+        </div>
+        <div class="rest-btns">
+          <button class="btn ghost sm" data-act="rest-add">+30 с</button>
+          <button class="btn ghost sm" data-act="rest-cancel">Отмена</button>
+        </div>
+      </div>
+      <div class="progress"><div id="restProgress" style="width:0%"></div></div>
+    </div>
+
+    <div class="card form-card">
+      <label for="exInput">Упражнение</label>
+      <div class="autocomplete">
+        <input id="exInput" placeholder="Начните вводить..." autocomplete="off" autocorrect="off" autocapitalize="sentences" enterkeyhint="done">
+        <div class="suggest" id="exSuggest"></div>
+      </div>
+      <div id="lastHint"></div>
+
+      <div class="grid2">
+        <div>
+          <label for="mReps">Повторения</label>
+          <div class="stepper">
+            <button type="button" data-act="step" data-for="mReps" data-d="-1"><svg class="i ic-minus" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+            <input id="mReps" inputmode="decimal" placeholder="0" autocomplete="off">
+            <button type="button" data-act="step" data-for="mReps" data-d="1"><svg class="i ic-plus" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          </div>
+        </div>
+        <div>
+          <label for="mSets">Подходы</label>
+          <div class="stepper">
+            <button type="button" data-act="step" data-for="mSets" data-d="-1"><svg class="i ic-minus" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+            <input id="mSets" inputmode="decimal" placeholder="1" autocomplete="off">
+            <button type="button" data-act="step" data-for="mSets" data-d="1"><svg class="i ic-plus" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div>
+          <label for="mWeight">Вес (кг)</label>
+          <div class="stepper">
+            <button type="button" data-act="step" data-for="mWeight" data-d="-2.5"><svg class="i ic-minus" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+            <input id="mWeight" inputmode="decimal" placeholder="0" autocomplete="off">
+            <button type="button" data-act="step" data-for="mWeight" data-d="2.5"><svg class="i ic-plus" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          </div>
+        </div>
+        <div>
+          <label for="mTime">Время (мин)</label>
+          <div class="stepper">
+            <button type="button" data-act="step" data-for="mTime" data-d="-1"><svg class="i ic-minus" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+            <input id="mTime" inputmode="decimal" placeholder="0" autocomplete="off">
+            <button type="button" data-act="step" data-for="mTime" data-d="1"><svg class="i ic-plus" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          </div>
+        </div>
+      </div>
+
+      <label for="mNotes">Заметки</label>
+      <input id="mNotes" placeholder="необязательно" autocomplete="off">
+
+      <div class="form-actions">
+        <button class="btn ghost" data-act="clear-form">Очистить</button>
+        <button class="btn ok" data-act="save"><svg class="i ic-save" aria-hidden="true"><use href="#i-save"></use></svg>Сохранить</button>
+      </div>
+    </div>
+
+    <div class="rest-presets">
+      <div class="muted" style="margin:8px 2px 6px">Отдых:</div>
+      <div class="chips">
+        <div class="chip" data-act="rest" data-sec="60">1:00</div>
+        <div class="chip" data-act="rest" data-sec="120">2:00</div>
+        <div class="chip" data-act="rest" data-sec="180">3:00</div>
+        <div class="chip" data-act="rest" data-sec="300">5:00</div>
+        <div class="chip" data-act="rest-custom">Своё…</div>
+      </div>
+    </div>
+
+    <div id="todayList"></div>
+  </main>
+</section>
+
+<!-- ============ ЭКРАН УПРАЖНЕНИЙ ============ -->
+<section id="view-ex" class="view hidden">
+  <header class="topbar">
+    <div class="topbar-title">Упражнения</div>
+    <button class="icon-btn" data-act="ex-add" aria-label="Добавить упражнение"><svg class="i ic-plus" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+  </header>
+  <main class="container">
+    <input id="exSearch" class="search" type="search" placeholder="Поиск упражнения" autocomplete="off" autocorrect="off">
+    <div id="exList"></div>
+  </main>
+</section>
+
+<!-- ============ ЭКРАН ИСТОРИИ УПРАЖНЕНИЯ ============ -->
+<section id="view-history" class="view hidden">
+  <header class="topbar">
+    <button class="icon-btn" data-act="hist-back" aria-label="Назад"><svg class="i ic-back" aria-hidden="true"><use href="#i-back"></use></svg></button>
+    <div class="topbar-title" id="histTitle">История</div>
+    <button class="icon-btn" data-act="ex-menu" aria-label="Действия"><svg class="i ic-more" aria-hidden="true"><use href="#i-more"></use></svg></button>
+  </header>
+  <main class="container">
+    <div id="histList"></div>
+  </main>
+</section>
+
+<!-- ============ ЭКРАН СТАТИСТИКИ ============ -->
+<section id="view-stats" class="view hidden">
+  <header class="topbar">
+    <div class="topbar-title">Статистика</div>
+    <button class="icon-btn" data-act="data" aria-label="Данные"><svg class="i ic-more" aria-hidden="true"><use href="#i-more"></use></svg></button>
+  </header>
+  <main class="container">
+    <div class="data-row">
+      <button class="btn ghost sm" data-act="export"><svg class="i ic-upload" aria-hidden="true"><use href="#i-upload"></use></svg>Выгрузить</button>
+      <button class="btn ghost sm" data-act="import"><svg class="i ic-download" aria-hidden="true"><use href="#i-download"></use></svg>Загрузить</button>
+    </div>
+    <div id="statsWarn"></div>
+    <div id="statsTop"></div>
+    <div class="seg" id="statsSeg">
+      <button data-act="stats-mode" data-mode="cards" class="active">Тренировки</button>
+      <button data-act="stats-mode" data-mode="table">Таблица</button>
+    </div>
+    <div id="statsBody"></div>
+  </main>
+</section>
+
+</div><!-- /scroller -->
+
+<!-- ============ НИЖНЕЕ МЕНЮ ============ -->
+<nav class="nav">
+  <button data-act="tab" data-tab="record" class="active"><svg class="i ic-pen ico" aria-hidden="true"><use href="#i-pen"></use></svg>Запись</button>
+  <button data-act="tab" data-tab="ex"><svg class="i ic-dumbbell ico" aria-hidden="true"><use href="#i-dumbbell"></use></svg>Упражнения</button>
+  <button data-act="tab" data-tab="stats"><svg class="i ic-chart ico" aria-hidden="true"><use href="#i-chart"></use></svg>Статистика</button>
+</nav>
+
+<div class="modal" id="modal">
+  <div class="sheet" id="modalSheet"></div>
+</div>
+
+<div class="dialog" id="dialog"></div>
+<div class="toast" id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
