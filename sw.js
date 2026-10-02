@@ -1,10 +1,11 @@
 /* Офлайн-кэш. Все файлы приложения хранятся ОДНИМ набором под именем VERSION и всегда
    отдаются из него — HTML, CSS и JS гарантированно из одной версии, даже при плохой связи.
-   ВАЖНО: после любой правки файлов увеличьте VERSION — иначе телефон продолжит открывать старый набор.
+   ВАЖНО: после любой правки файлов увеличьте версию в version.js — иначе телефон продолжит открывать старый набор.
    Новый набор скачивается целиком (в обход HTTP-кэша GitHub Pages); если хоть один основной файл
    не скачался — обновление отменяется и остаётся старая рабочая версия. */
-const VERSION = 'v12';
-const CORE  = ['./', './index.html', './style.css', './script.js', './manifest.webmanifest'];
+importScripts('./version.js');             // версия задаётся в version.js
+const VERSION = self.APP_VERSION;
+const CORE  = ['./', './index.html', './style.css', './version.js', './script.js', './manifest.webmanifest'];
 const EXTRA = ['./icon-180.png', './icon-192.png', './icon-512.png'];   // иконки — по возможности
 
 const fresh = url => fetch(new Request(url, { cache: 'no-cache' }));
@@ -54,6 +55,11 @@ self.addEventListener('fetch', e => {
       return Response.error();
     }
   })());
+});
+
+// страница спрашивает версию SW — так она узнаёт, что обновление уже скачано
+self.addEventListener('message', e => {
+  if (e.data === 'version' && e.ports && e.ports[0]) e.ports[0].postMessage(VERSION);
 });
 
 // нажатие на уведомление «Отдых окончен» — открыть приложение

@@ -383,7 +383,7 @@ function homeHintHtml(){
 }
 function renderNotices(){
   const box=$('#recNotice');
-  if(box) box.innerHTML=homeHintHtml()+backupWarnHtml();
+  if(box) box.innerHTML=updateHtml()+homeHintHtml()+backupWarnHtml();
 }
 
 /* ================== НАВИГАЦИЯ ================== */
@@ -524,7 +524,11 @@ function renderLastHint(){
   const box=$('#lastHint');
   const ex=exByName(exInput.value);
   const r=ex && lastRecOf(ex.id);
-  if(!r){ box.innerHTML=''; return; }
+  if(!r){
+    // упражнение есть (например, из программы), но его ещё ни разу не записывали
+    box.innerHTML = ex ? `<div class="hint-card"><div class="muted">Прошлый раз · записей по «${esc(ex.name)}» ещё нет</div></div>` : '';
+    return;
+  }
   const maxW=DB.records.reduce((m,x)=>x.exId===ex.id && x.weight>m ? x.weight : m, 0);
   box.innerHTML=`<div class="hint-card">
     <div>
@@ -1908,7 +1912,7 @@ function openDataSheet(){
   const nW=sortedWorkouts().length;
   openModal(`<div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
     <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.<br>
-    ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}</p>
+    ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}<br>Версия приложения: ${esc(APP_VERSION)}</p>
     <p class="muted" id="persistInfo">Защита хранилища: проверяется…</p>
     <button class="btn big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
     <button class="btn ghost big" data-act="import" data-kind="backup">${I('swap')}Восстановить из копии</button>
@@ -2678,6 +2682,7 @@ document.addEventListener('click', e=>{
     case 'backup':           openBackup(); break;
     case 'backup-restore':   restoreBackup(); break;
     case 'import-prog-run':  runProgramImport(); break;
+    case 'app-reload':       location.reload(); break;
     case 'hint-off':         try{ localStorage.setItem(HINT_KEY,'1'); }catch(_){} renderNotices(); break;
     // программы
     case 'name-save':        nameSave(); break;
@@ -2748,7 +2753,8 @@ document.addEventListener('visibilitychange', ()=>{
   if(DB.active.restEnd){ tickRest(); requestWake(); }
   if(!$('#modal').classList.contains('show')) refresh();
   checkForgotten();
-  if(swReg) swReg.update().catch(()=>{});   // проверить, не вышла ли новая версия
+  if(swReg) swReg.update().then(checkUpdate, checkUpdate);   // проверить, не вышла ли новая версия
+  else checkUpdate();
 });
 
 // изменения из другой вкладки/окна
@@ -2760,20 +2766,48 @@ window.addEventListener('storage', e=>{
 window.onerror=function(msg, src, line){ console.error('Ошибка:', msg, 'строка', line); return false; };
 
 /* ================== ОФЛАЙН И ОБНОВЛЕНИЯ ==================
-   Service Worker отдаёт все файлы одним набором. Когда на GitHub выходит новая версия
-   (в sw.js увеличен VERSION), она скачивается целиком в фоне, и приложение предлагает перезапуститься. */
-let swReg=null;
-if('serviceWorker' in navigator && location.protocol==='https:'){
-  const hadSW=!!navigator.serviceWorker.controller;
-  navigator.serviceWorker.register('sw.js', {updateViaCache:'none'})
-    .then(r=>{ swReg=r; })
-    .catch(()=>{});
-  let reloadOffered=false;
-  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
-    if(!hadSW || reloadOffered) return;      // первая установка — перезапуск не нужен
-    reloadOffered=true;
-    toast('Вышла новая версия приложения', 'Обновить', ()=>location.reload(), 10000, 'swap');
+   Версия приложения задаётся в одном месте — version.js (его читают и страница, и Service Worker).
+   Страница знает свою версию (APP_VERSION) и спрашивает у Service Worker, какая версия у него.
+   Если у SW новее — значит, на GitHub вышло обновление и оно уже скачано: показываем плашку «Обновить».
+   Проверка идёт при запуске, при возврате в приложение и при смене SW — событие не потеряется. */
+const APP_VERSION = window.APP_VERSION || '?';
+let swReg=null, updateReady=false;
+function swVersion(sw){
+  return new Promise(res=>{
+    if(!sw){ res(null); return; }
+    try{
+      const ch=new MessageChannel();
+      const t=setTimeout(()=>res(null), 2000);
+      ch.port1.onmessage=e=>{ clearTimeout(t); res(e.data); };
+      sw.postMessage('version', [ch.port2]);
+    }catch(e){ res(null); }
   });
+}
+async function checkUpdate(){
+  if(updateReady || !('serviceWorker' in navigator)) return;
+  const v=await swVersion(navigator.serviceWorker.controller);
+  if(v && APP_VERSION!=='?' && v!==APP_VERSION){
+    updateReady=true;
+    renderNotices();
+    toast('Вышла новая версия приложения', 'Обновить', ()=>location.reload(), 8000, 'swap');
+  }
+}
+function updateHtml(){
+  return updateReady ? `<div class="warn-line upd-line" data-act="app-reload">${I('swap')}<span>Вышла новая версия приложения — нажмите, чтобы обновить</span></div>` : '';
+}
+if('serviceWorker' in navigator && location.protocol==='https:'){
+  navigator.serviceWorker.register('sw.js', {updateViaCache:'none'})
+    .then(r=>{
+      swReg=r;
+      // новая версия установилась, пока приложение открыто
+      r.addEventListener('updatefound', ()=>{
+        const w=r.installing; if(!w) return;
+        w.addEventListener('statechange', ()=>{ if(w.state==='activated') checkUpdate(); });
+      });
+    })
+    .catch(()=>{});
+  navigator.serviceWorker.addEventListener('controllerchange', checkUpdate);
+  navigator.serviceWorker.ready.then(()=>checkUpdate()).catch(()=>{});
 }
 
 /* ================== СТАРТ ================== */
