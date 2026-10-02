@@ -445,7 +445,7 @@ function renderSuggest(){
 }
 function hideSuggest(){ exSuggest.classList.remove('show'); }
 
-exInput.addEventListener('input', ()=>{ renderSuggest(); renderLastHint(); });
+exInput.addEventListener('input', ()=>{ renderSuggest(); renderLastHint(); renderPlanNext(); });
 exInput.addEventListener('focus', renderSuggest);
 exInput.addEventListener('blur', ()=>setTimeout(hideSuggest,250));
 exInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); hideSuggest(); exInput.blur(); } });
@@ -457,7 +457,7 @@ exSuggest.addEventListener('click', e=>{
   else { const ex=exById(+it.dataset.exid); if(ex) exInput.value=ex.name; }
   hideSuggest();
   exInput.blur();
-  renderLastHint();
+  renderLastHint(); renderPlanNext();
 });
 
 function formEmpty(){ return NUM_FIELDS.every(id=>!$('#'+id).value.trim()); }
@@ -471,7 +471,7 @@ function fillFromLast(){
 function clearForm(withName){
   NUM_FIELDS.forEach(id=>$('#'+id).value='');
   $('#mNotes').value='';
-  if(withName){ exInput.value=''; renderLastHint(); }
+  if(withName){ exInput.value=''; renderLastHint(); renderPlanNext(); }
 }
 /* ---- пределы ввода ---- */
 const LIMITS={ reps:10000, sets:10000, weight:100000, time:6000, rest:600 };   // time и rest — в минутах
@@ -759,11 +759,13 @@ function customRestStart(){
 }
 
 /* ---- звук / вибрация / уведомления / экран ---- */
-/* Звук. На iPhone Web Audio «засыпает» (состояние suspended / interrupted) после системных окон
-   (например, запроса разрешения на уведомления), звонка или сворачивания приложения.
-   Поэтому: будим его при каждом касании экрана и при возврате в приложение, а если в момент
-   сигнала он всё равно спит — играем запасной звук через обычный <audio>. */
-let AC=null, beepEl=null;
+/* Звук. На iPhone Web Audio «засыпает» (suspended / interrupted) после системных окон, звонка
+   или сворачивания приложения. Будим его при касаниях и при возврате в приложение.
+   Главное правило сигнала: он звучит СЕЙЧАС или не звучит вовсе. Всё, что не успело заиграть
+   за 1,5 с (спящий звук, отложенное воспроизведение), гасится — иначе iOS проиграет его потом,
+   в случайный момент, как только звук «проснётся». */
+const BEEP_LATE_MS=1500;
+let AC=null, beepEl=null, beepElUnlocked=false, beepElBusy=false;
 function acReady(){ return AC && AC.state==='running'; }
 function unlockAudio(){
   try{
@@ -774,19 +776,20 @@ function unlockAudio(){
       s.buffer=b; s.connect(AC.destination); s.start(0);
     }
   }catch(e){}
-  // запасной звук: «разблокируем» элемент <audio> тихим проигрыванием в момент касания
+  // запасной звук: один раз «разблокируем» <audio> беззвучным проигрыванием в момент касания
   try{
     if(!beepEl){ beepEl=new Audio(beepWavUrl()); beepEl.preload='auto'; }
-    if(!beepEl.dataset.unlocked){
+    if(!beepElUnlocked && !beepElBusy){
+      beepElBusy=true;
       beepEl.muted=true;
+      const fin=ok=>{ try{ beepEl.pause(); beepEl.currentTime=0; }catch(_){} beepEl.muted=false; beepElBusy=false; if(ok) beepElUnlocked=true; };
       const p=beepEl.play();
-      const done=()=>{ try{ beepEl.pause(); beepEl.currentTime=0; }catch(_){} beepEl.muted=false; beepEl.dataset.unlocked='1'; };
-      if(p && p.then) p.then(done).catch(()=>{ beepEl.muted=false; }); else done();
+      if(p && p.then) p.then(()=>fin(true), ()=>fin(false)); else fin(true);
     }
-  }catch(e){}
+  }catch(e){ beepElBusy=false; }
 }
 // при каждом касании — только если звук уснул (дёшево)
-document.addEventListener('touchend', ()=>{ if(!acReady() || !(beepEl && beepEl.dataset.unlocked)) unlockAudio(); }, {passive:true});
+document.addEventListener('touchend', ()=>{ if(!acReady() || !beepElUnlocked) unlockAudio(); }, {passive:true});
 document.addEventListener('click', ()=>{ if(!acReady()) unlockAudio(); }, true);
 
 // WAV с тремя сигналами 880 Гц — для запасного проигрывания
@@ -811,32 +814,55 @@ function beepWavUrl(){
   _beepUrl=URL.createObjectURL(new Blob([buf],{type:'audio/wav'}));
   return _beepUrl;
 }
+// Web Audio: если через 1,5 с часы звука не сдвинулись — звук завис, отключаем запланированный сигнал
 function beepWeb(){
-  const t0=AC.currentTime+0.05;
+  const ctx=AC, out=ctx.createGain();
+  out.connect(ctx.destination);
+  const t0=ctx.currentTime+0.05, start=ctx.currentTime;
   [0,0.3,0.6].forEach(dt=>{
-    const o=AC.createOscillator(), g=AC.createGain();
+    const o=ctx.createOscillator(), g=ctx.createGain();
     o.type='sine'; o.frequency.value=880;
     g.gain.setValueAtTime(0.0001,t0+dt);
     g.gain.exponentialRampToValueAtTime(0.3,t0+dt+0.02);
     g.gain.exponentialRampToValueAtTime(0.0001,t0+dt+0.22);
-    o.connect(g); g.connect(AC.destination);
+    o.connect(g); g.connect(out);
     o.start(t0+dt); o.stop(t0+dt+0.25);
   });
+  setTimeout(()=>{
+    if(ctx.currentTime-start < 0.5){ try{ out.disconnect(); }catch(_){} return false; }   // звук не играл — отменяем
+  }, BEEP_LATE_MS);
+  return true;
 }
+// <audio>: если за 1,5 с проигрывание не началось — останавливаем, чтобы оно не «выстрелило» позже
 function beepFallback(){
   try{
     if(!beepEl) beepEl=new Audio(beepWavUrl());
+    if(beepElBusy) return;                       // идёт беззвучная разблокировка — не трогаем
+    const asked=Date.now();
+    let started=false;
+    const onPlaying=()=>{
+      beepEl.removeEventListener('playing', onPlaying);
+      if(Date.now()-asked > BEEP_LATE_MS){ try{ beepEl.pause(); beepEl.currentTime=0; }catch(_){} return; }
+      started=true;
+    };
+    beepEl.addEventListener('playing', onPlaying);
     beepEl.muted=false; beepEl.currentTime=0;
     const p=beepEl.play(); if(p && p.catch) p.catch(()=>{});
+    setTimeout(()=>{
+      if(started) return;
+      beepEl.removeEventListener('playing', onPlaying);
+      try{ beepEl.pause(); beepEl.currentTime=0; }catch(_){}
+    }, BEEP_LATE_MS);
   }catch(e){}
 }
 async function beep(){
+  if(document.hidden) return;                    // приложение свёрнуто — звук не выйдет, остаётся уведомление
   try{
     if(!AC) unlockAudio();
     if(AC && AC.state!=='running'){
-      // пробуем разбудить, но не дольше 300 мс
       await Promise.race([AC.resume().catch(()=>{}), new Promise(r=>setTimeout(r,300))]);
     }
+    if(document.hidden) return;
     if(acReady()) beepWeb(); else beepFallback();
   }catch(e){ beepFallback(); }
 }
@@ -1719,6 +1745,7 @@ function planStatus(x){
 function renderPlan(){
   const box=$('#planBox'); if(!box) return;
   const x=planCtx();
+  renderPlanNext();
   if(!x){
     box.innerHTML = hasPlanDays() ? `<button class="btn ghost plan-open" data-act="plan-pick">${I('clip')}Тренировка по программе</button>` : '';
     return;
@@ -1771,7 +1798,24 @@ function closePlan(){
   DB.active.plan=null; save(); renderPlan();
   toast('Программа скрыта — тренировка продолжается');
 }
-function fillFromPlan(i){
+// подсказка над полем «Упражнение»: первое невыполненное упражнение программы — подставить одним нажатием
+function renderPlanNext(){
+  const box=$('#planNext'); if(!box) return;
+  const x=planCtx();
+  const next = x ? planStatus(x).indexOf(false) : -1;
+  const it = next>=0 ? x.d.items[next] : null;
+  const e = it && exById(it.exId);
+  // уже подставлено (или введено вручную) — подсказка не нужна
+  if(!e || normKey(exInput.value)===normKey(e.name)){ box.innerHTML=''; return; }
+  box.innerHTML=`<div class="plan-next" data-act="plan-next" data-i="${next}">
+    <span class="plan-mark">${next+1}</span>
+    <div class="rec-main"><div class="plan-next-lbl">Следующее по программе</div>
+      <div class="rec-name">${esc(e.name)}</div>
+      <div class="rec-desc">${esc(describe(it))||'—'}</div></div>
+    <span class="plan-next-btn">Подставить</span>
+  </div>`;
+}
+function fillFromPlan(i, noScroll){
   const x=planCtx(); if(!x) return;
   const it=x.d.items[i]; if(!it) return;
   const e=exById(it.exId);
@@ -1780,7 +1824,8 @@ function fillFromPlan(i){
   $('#mTime').value=minIn(it.time);
   $('#mNotes').value='';
   NUM_FIELDS.forEach(id=>markBad($('#'+id),false));
-  hideSuggest(); renderLastHint();
+  hideSuggest(); renderLastHint(); renderPlanNext();
+  if(noScroll) return;
   try{
     const sc=$('#scroller'), fc=$('.form-card');
     sc.scrollBy({top:fc.getBoundingClientRect().top - sc.getBoundingClientRect().top - 64, behavior:'smooth'});
@@ -2666,6 +2711,7 @@ document.addEventListener('click', e=>{
     case 'plan-start':       startPlan(id); break;
     case 'plan-close':       closePlan(); break;
     case 'plan-fill':        fillFromPlan(+el.dataset.i); break;
+    case 'plan-next':        fillFromPlan(+el.dataset.i, true); break;
     case 'w-toprog':         openAddToProg(id); break;
     case 'ap-save':          saveAddToProg(); break;
   }

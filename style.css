@@ -395,6 +395,15 @@ input[type=date]{min-height:48px;display:block;text-align:left}
 .plan-row.next .plan-mark{background:var(--accent);color:#fff}
 .plan-done{display:flex;gap:8px;align-items:center;color:var(--ok);font-weight:600;padding-top:10px;border-top:1px solid var(--border)}
 .sheet .rec-row .plan-mark{background:var(--card)}
+/* подсказка «Следующее по программе» над полем упражнения */
+.plan-next{display:flex;align-items:center;gap:10px;cursor:pointer;
+  background:rgba(55,194,110,.08);border:1px solid rgba(55,194,110,.35);
+  border-radius:10px;padding:9px 12px;margin-bottom:2px}
+.plan-next:active{opacity:.6}
+.plan-next .plan-mark{background:var(--accent);color:#fff}
+.plan-next-lbl{font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.4px}
+.plan-next .rec-desc{font-size:13px}
+.plan-next-btn{flex:none;color:var(--ok);font-weight:700;font-size:14px}
 
 /* редактор тренировки программы */
 .pi{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:8px}
