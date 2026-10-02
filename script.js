@@ -574,6 +574,7 @@ function onTimerBtn(){
 }
 function startWorkout(silent){
   if(DB.active.wId) return;
+  forgotAsked=false;
   const w={id:nid('w'), start:Date.now(), end:null, timed:true, rest:0};
   DB.workouts.push(w);
   DB.active.wId=w.id;
@@ -616,6 +617,32 @@ function tickWorkout(){
   const parts=[`${n} ${plural(n,'запись','записи','записей')}`];
   if(w.rest) parts.push('отдых '+fmtDur(w.rest));
   $('#workoutSub').textContent=parts.join(' · ');
+}
+
+// тренировка без активности больше 3 часов — скорее всего, забыли нажать «Стоп»
+const FORGOT_MS=3*3600e3;
+let forgotAsked=false, forgotBusy=false;
+async function checkForgotten(){
+  const w=activeW();
+  if(!w || forgotAsked || forgotBusy) return;
+  const recs=recsOfW(w.id);
+  const lastTs=recs.length ? recs[recs.length-1].ts : w.start;
+  const lastAct=Math.max(lastTs, DB.active.restEnd||0);
+  if(Date.now()-lastAct < FORGOT_MS) return;
+  forgotBusy=true;
+  const end=recs.length ? lastTs+60000 : w.start;
+  const msg = recs.length
+    ? `Тренировка идёт уже ${fmtDur((Date.now()-w.start)/1000)}, последняя запись — ${relDay(lastTs)} в ${fmtTime(lastTs)}. Похоже, её забыли завершить.<br><br>Завершить в ${fmtTime(end)}? Длительность будет ${fmtDur((end-w.start)/1000)}.`
+    : `Тренировка без записей идёт уже ${fmtDur((Date.now()-w.start)/1000)}. Похоже, её забыли завершить. Убрать её?`;
+  const ok=await ask(msg, recs.length?'Завершить':'Убрать', false, 'Продолжить');
+  forgotBusy=false; forgotAsked=true;
+  if(!ok || DB.active.wId!==w.id) return;
+  if(DB.active.restEnd){ DB.active.restEnd=null; DB.active.restTotal=0; hideRest(); }
+  DB.active.wId=null; DB.active.plan=null;
+  w.end=end; w.timed=true;
+  cleanupWorkouts(); save();
+  renderWorkoutBar(); refresh();
+  toast(recs.length ? `Тренировка завершена · ${fmtDur((end-w.start)/1000)}` : 'Пустая тренировка убрана', null, null, null, recs.length?'flag':null);
 }
 
 /* ================== ТАЙМЕР ОТДЫХА ================== */
@@ -1111,7 +1138,7 @@ function renderStats(){
   const top=$('#statsTop'), body=$('#statsBody'), warn=$('#statsWarn');
   $$('#statsSeg button').forEach(b=>b.classList.toggle('active', b.dataset.mode===statsMode));
   warn.innerHTML = (DB.records.length && (!DB.lastExport || Date.now()-DB.lastExport>14*DAY))
-    ? `<div class="warn-line" data-act="export">${I('alert')}<span>${DB.lastExport?'Последняя резервная копия '+fmtDate(DB.lastExport):'Резервной копии ещё нет'} — нажмите, чтобы выгрузить таблицу</span></div>` : '';
+    ? `<div class="warn-line" data-act="backup">${I('alert')}<span>${DB.lastExport?'Последняя резервная копия '+fmtDate(DB.lastExport):'Резервной копии ещё нет'} — нажмите, чтобы сохранить полную копию</span></div>` : '';
 
   const ws=sortedWorkouts();
   if(!ws.length){
@@ -1733,8 +1760,9 @@ function openDataSheet(){
   openModal(`<div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
     <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.<br>
     ${DB.lastExport?'Последняя выгрузка: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Выгрузок ещё не было.'}</p>
-    <button class="btn big" data-act="export">${I('upload')}Выгрузить записи</button>
-    <button class="btn ghost big" data-act="import">${I('download')}Загрузить таблицу</button>
+    <button class="btn big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
+    <button class="btn ghost big" data-act="export">${I('upload')}Выгрузить записи (таблица)</button>
+    <button class="btn ghost big" data-act="import">${I('download')}Загрузить</button>
     <button class="btn danger big" data-act="clear-all">${I('trash')}Удалить все данные</button>`);
 }
 
@@ -1885,16 +1913,39 @@ function exportPayload(){
     const rows = full ? buildRows(null,null) : buildRows(from,to);
     if(rows.length<2){ toast('За выбранный период нет записей'); return null; }
     const name = full ? `Тренировки_${today}.csv` : `Тренировки_${$('#exFrom').value||'начало'}_${$('#exTo').value||'конец'}.csv`;
-    return {rows, name, backup:full};
+    return csvPayload(rows, name);
   }
-  if(exportCtx.kind==='template') return {rows:templateRows(), name:'Шаблон_программы.csv'};
+  if(exportCtx.kind==='backup'){
+    const text=JSON.stringify(backupData());
+    return {file:text, copy:text, name:`Полная_копия_${today}.json`, mime:'application/json', backup:true};
+  }
+  if(exportCtx.kind==='template') return csvPayload(templateRows(), 'Шаблон_программы.csv');
   const progs=(exportCtx.ids||[]).map(progById).filter(Boolean);
   if(!progs.length){ toast('Нет программ для выгрузки'); return null; }
-  return {rows:buildProgramRows(progs), name: progs.length===1 ? `Программа_${safeFile(progs[0].name)}.csv` : `Программы_${today}.csv`};
+  return csvPayload(buildProgramRows(progs), progs.length===1 ? `Программа_${safeFile(progs[0].name)}.csv` : `Программы_${today}.csv`);
+}
+function csvPayload(rows, name){
+  return {file:'\ufeff'+toDelimited(rows,';'), copy:toDelimited(rows,'\t'), name, mime:'text/csv', backup:false};
+}
+
+/* ---- полная копия: записи, тренировки, упражнения и программы одним файлом ---- */
+const BACKUP_APP='fitness-tracker-backup';
+function backupData(){
+  return {app:BACKUP_APP, v:1, created:new Date().toISOString(),
+    data:{v:DB.v, exercises:DB.exercises, records:DB.records, workouts:DB.workouts, programs:DB.programs, seq:DB.seq}};
+}
+function openBackup(){
+  exportCtx={kind:'backup'};
+  const nW=recWorkouts().length;
+  openModal(`<div class="sheet-head"><h2>Полная копия</h2>${closeX()}</div>
+    <p class="muted">Один файл со всем сразу: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')},
+    ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.
+    Сохраните его в «Файлы» (лучше в iCloud Drive). Восстановить: «Загрузить» → выбрать этот файл.</p>
+    ${exportButtons().replace('Скопировать таблицу','Скопировать текст копии').replace(/<p class="muted" style="margin-top:12px">.*?<\/p>/s,'')}`);
 }
 async function shareExport(){
   const P=exportPayload(); if(!P) return;
-  const file=new File(['﻿'+toDelimited(P.rows,';')], P.name, {type:'text/csv'});
+  const file=new File([P.file], P.name, {type:P.mime});
   try{
     await navigator.share({files:[file], title:P.name});
     if(P.backup) markExported();
@@ -1907,7 +1958,7 @@ async function shareExport(){
 function downloadExport(){
   const P=exportPayload(); if(!P) return;
   try{
-    const blob=new Blob(['﻿'+toDelimited(P.rows,';')], {type:'text/csv;charset=utf-8'});
+    const blob=new Blob([P.file], {type:P.mime+';charset=utf-8'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
     a.href=url; a.download=P.name; a.rel='noopener';
@@ -1921,10 +1972,10 @@ function downloadExport(){
 }
 async function copyExport(){
   const P=exportPayload(); if(!P) return;
-  const text=toDelimited(P.rows,'\t');
+  const text=P.copy;
   if(await copyText(text)){
     if(P.backup) markExported();
-    closeModal(); toast('Скопировано — вставьте в таблицу или в Заметки', null, null, null, 'check'); return;
+    closeModal(); toast(P.mime==='application/json' ? 'Скопировано — сохраните текст в Заметки или файл' : 'Скопировано — вставьте в таблицу или в Заметки', null, null, null, 'check'); return;
   }
   openModal(`<h2>Скопируйте вручную</h2>
     <textarea readonly style="height:50vh;font-family:ui-monospace,monospace;font-size:12px">${esc(text)}</textarea>
@@ -1953,11 +2004,11 @@ let pendingImport=null;
 
 function openImport(){
   openModal(`<div class="sheet-head"><h2>Загрузить таблицу</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
-    <p class="muted">Подходит CSV, выгруженный из этого трекера (записи или программа), или своя таблица.
+    <p class="muted">Подходит файл полной копии (.json), CSV, выгруженный из этого трекера (записи или программа), или своя таблица.
     Для записей нужны колонки <b>Дата</b> и <b>Упражнение</b>, для программы — <b>Упражнение</b> и по желанию <b>Программа</b>, <b>Папка</b>, <b>Тренировка</b>.
     Дальше <b>Повторения</b>, <b>Подходы</b>, <b>Вес</b>, <b>Время</b>, <b>Заметки</b>. Порядок колонок не важен. После выбора файла приложение спросит, что это — записи или программа.</p>
     <div class="btn big file-btn">${I('folder')}Выбрать файл
-      <input type="file" id="importFile" accept=".csv,.tsv,.txt,text/csv,text/plain,text/tab-separated-values">
+      <input type="file" id="importFile" accept=".csv,.tsv,.txt,.json,text/csv,text/plain,text/tab-separated-values,application/json">
     </div>
     <label for="importText">или вставьте ячейки таблицы</label>
     <textarea id="importText" placeholder="Скопируйте строки в Numbers / Excel вместе со строкой заголовков и вставьте сюда"></textarea>
@@ -1986,8 +2037,14 @@ async function readFileText(f){
   if(b[0]===0xFE&&b[1]===0xFF) return new TextDecoder('utf-16be').decode(b);
   try{ return new TextDecoder('utf-8',{fatal:true}).decode(b); }
   catch(e){
-    try{ return new TextDecoder('windows-1251').decode(b); }   // CSV из Excel под Windows
-    catch(e2){ return new TextDecoder('utf-8').decode(b); }
+    // не UTF-8: CSV из Excel под Windows (windows-1251) или под Mac (x-mac-cyrillic) — берём тот,
+    // где нашёлся заголовок «Упражнение» или больше обычных русских букв
+    const score=t=>(/упражн/i.test(t)?1e6:0)+(t.match(/[а-яё]/g)||[]).length-(t.match(/[^\x00-\x7fа-яёА-ЯЁ№«»—–…]/g)||[]).length*3;
+    let best=null, bestScore=-Infinity;
+    ['windows-1251','x-mac-cyrillic'].forEach(enc=>{
+      try{ const t=new TextDecoder(enc).decode(b), s=score(t); if(s>bestScore){ best=t; bestScore=s; } }catch(_){}
+    });
+    return best!=null ? best : new TextDecoder('utf-8').decode(b);
   }
 }
 function importFromTextarea(){
@@ -2138,15 +2195,64 @@ function errHtml(errors){
   if(!errors.length) return '';
   return `<div class="warn-box">Пропущено строк: ${errors.length}<br>${errors.slice(0,5).map(esc).join('<br>')}${errors.length>5?'<br>…':''}</div>`;
 }
-let pendingRows=null, pendingProg=null;
+let pendingRows=null, pendingProg=null, pendingBackup=null;
+
+function previewBackup(text){
+  let B;
+  try{ B=JSON.parse(text); }catch(e){ ask('Файл копии повреждён — не удалось его прочитать.','OK',false,null); return; }
+  const d=B && B.app===BACKUP_APP && B.data;
+  if(!d || !Array.isArray(d.records) || !Array.isArray(d.exercises)){ ask('Это не файл полной копии трекера.','OK',false,null); return; }
+  pendingBackup=d;
+  const nW=new Set(d.records.map(r=>r.wId)).size, nP=Array.isArray(d.programs)?d.programs.length:0;
+  const when=B.created ? new Date(B.created) : null;
+  openModal(`<div class="sheet-head"><h2>Восстановление</h2>${closeX()}</div>
+    <p class="muted">Полная копия${when && !isNaN(when)?' от '+fmtDate(when.getTime())+' '+fmtTime(when.getTime()):''}.</p>
+    <div class="stats-summary">
+      <div class="stats-box"><div class="lbl">Тренировок</div><div class="val">${nW}</div></div>
+      <div class="stats-box"><div class="lbl">Записей</div><div class="val">${d.records.length}</div></div>
+      <div class="stats-box"><div class="lbl">Упражнений</div><div class="val">${d.exercises.length}</div></div>
+      <div class="stats-box"><div class="lbl">Программ</div><div class="val">${nP}</div></div>
+    </div>
+    <div class="warn-box">Все текущие данные на этом устройстве (${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}) будут заменены содержимым копии.</div>
+    <button class="btn danger big" data-act="backup-restore">${I('swap')}Восстановить из копии</button>
+    <button class="btn ghost big" data-act="close-modal">Отмена</button>`);
+}
+async function restoreBackup(){
+  const d=pendingBackup; if(!d) return;
+  if(DB.records.length || DB.programs.length){
+    if(!await ask('Заменить все текущие данные содержимым копии? Отменить будет нельзя.','Заменить',true)) return;
+  }
+  hideRest();
+  const fresh=normalize(Object.assign({}, d, {active:null, lastExport:Date.now()}));
+  DB=fresh;
+  fixOrphans(); fixProgramRefs(); cleanupWorkouts(); save();
+  pendingBackup=null;
+  closeModal();
+  exInput.value=''; clearForm(true);
+  renderWorkoutBar(); refresh();
+  toast('Данные восстановлены из копии', null, null, 3500, 'check');
+}
 
 function headerRow(rows){ return rows.findIndex(r=>r.some(c=>normHead(c).startsWith('упражн'))); }
 
 // шаг 1: что это за таблица — записи или программа
+const ENCODING_HELP='Похоже, файл сохранён не в UTF-8 и русские буквы испортились. В Excel сохраните таблицу как <b>«CSV UTF-8 (разделители — запятые)»</b>, в Numbers — Файл → Экспорт → CSV (кодировка Unicode UTF-8). Или просто скопируйте ячейки и вставьте текстом.';
+function looksBroken(text){
+  const s=String(text).slice(0,4000);
+  if(/\ufffd/.test(s)) return true;                                  // «�» — байты не распознаны
+  if((s.match(/[ÐÑ][\u0080-\u00bf\u2018-\u203a\u0152-\u0192]/g)||[]).length>3) return true;   // UTF-8, прочитанный как Latin-1
+  const letters=(s.match(/[A-Za-zА-Яа-яЁё]/g)||[]).length;
+  return letters<10 && (s.match(/\?{2,}/g)||[]).length>2;          // кириллица заменена на «???»
+}
 function handleImportText(text){
+  const trimmed=String(text).replace(/^\ufeff/,'').trim();
+  if(trimmed.startsWith('{')){ previewBackup(trimmed); return; }
   const rows=parseDelimited(text);
   const hi=headerRow(rows);
-  if(hi<0){ ask('Не найдена строка заголовков. В таблице должна быть колонка «Упражнение».','OK',false,null); return; }
+  if(hi<0){
+    ask(looksBroken(text) ? ENCODING_HELP : 'Не найдена строка заголовков. В таблице должна быть колонка «Упражнение».','OK',false,null);
+    return;
+  }
   const head=rows[hi].map(normHead);
   const hasDate=head.some(h=>h.startsWith('дата'));
   const hasProg=head.some(h=>h.startsWith('программ') || h.startsWith('папк'));
@@ -2461,6 +2567,8 @@ document.addEventListener('click', e=>{
     case 'import-run':       runImport(el.dataset.mode); break;
     case 'clear-all':        clearAll(); break;
     case 'import-as':        importAs(el.dataset.kind); break;
+    case 'backup':           openBackup(); break;
+    case 'backup-restore':   restoreBackup(); break;
     case 'import-prog-run':  runProgramImport(); break;
     // программы
     case 'name-save':        nameSave(); break;
@@ -2530,6 +2638,7 @@ document.addEventListener('visibilitychange', ()=>{
   renderWorkoutBar();
   if(DB.active.restEnd){ tickRest(); requestWake(); }
   if(!$('#modal').classList.contains('show')) refresh();
+  checkForgotten();
 });
 
 // изменения из другой вкладки/окна
@@ -2557,3 +2666,4 @@ if(DB.active.restEnd){
 }
 showView('record');
 renderRecord();
+checkForgotten();
