@@ -409,7 +409,7 @@ function refresh(){
 /* ================== ЭКРАН «ЗАПИСЬ» ================== */
 const exInput=$('#exInput');
 const exSuggest=$('#exSuggest');
-const NUM_FIELDS=['mReps','mSets','mWeight','mTime'];
+const NUM_FIELDS=['mWeight','mReps','mSets','mTime'];
 
 function renderRecord(){
   renderNotices();
@@ -567,7 +567,7 @@ function saveRecord(){
   if(Date.now()-saveGuard<700) return;
   const name=cleanName(exInput.value);
   if(!name){ toast('Введите название упражнения'); exInput.focus(); return; }
-  if(!checkLimits([['mReps','reps'],['mSets','sets'],['mWeight','weight'],['mTime','time']])) return;
+  if(!checkLimits([['mWeight','weight'],['mReps','reps'],['mSets','sets'],['mTime','time']])) return;
   const reps=num($('#mReps').value), sets=num($('#mSets').value),
         weight=num($('#mWeight').value), time=minOut($('#mTime').value),
         notes=$('#mNotes').value.trim();
@@ -925,11 +925,11 @@ function openRecEdit(id, fromW){
     <label for="eTs">Дата и время</label>
     <input id="eTs" type="datetime-local" value="${toInputDT(r.ts)}">
     <div class="grid2">
+      <div><label for="eWeight">Вес (кг)</label><input id="eWeight" inputmode="decimal" value="${esc(inVal(r.weight))}" placeholder="0"></div>
       <div><label for="eReps">Повторения</label><input id="eReps" inputmode="decimal" value="${esc(inVal(r.reps))}" placeholder="0"></div>
-      <div><label for="eSets">Подходы</label><input id="eSets" inputmode="decimal" value="${esc(inVal(r.sets))}" placeholder="0"></div>
     </div>
     <div class="grid2">
-      <div><label for="eWeight">Вес (кг)</label><input id="eWeight" inputmode="decimal" value="${esc(inVal(r.weight))}" placeholder="0"></div>
+      <div><label for="eSets">Подходы</label><input id="eSets" inputmode="decimal" value="${esc(inVal(r.sets))}" placeholder="0"></div>
       <div><label for="eTime">Время (мин)</label><input id="eTime" inputmode="decimal" value="${esc(minIn(r.time))}" placeholder="0"></div>
     </div>
     <label for="eNotes">Заметки</label>
@@ -959,7 +959,7 @@ function saveRecEdit(id){
   if(!r){ closeModal(); return; }
   let ts=fromInputDT($('#eTs').value);
   if(!ts){ toast('Укажите дату и время'); return; }
-  if(!checkLimits([['eReps','reps'],['eSets','sets'],['eWeight','weight'],['eTime','time']])) return;
+  if(!checkLimits([['eWeight','weight'],['eReps','reps'],['eSets','sets'],['eTime','time']])) return;
   const vals={
     reps:num($('#eReps').value), sets:num($('#eSets').value),
     weight:num($('#eWeight').value), time:minOut($('#eTime').value),
@@ -1641,9 +1641,9 @@ function renderDayEdit(focusIdx){
         <button type="button" class="pi-btn" data-act="di-del" data-i="${i}" aria-label="Убрать">${I('trash')}</button>
       </div>
       <div class="pi-grid">
+        <label class="pi-l">Вес, кг<input class="pi-weight" inputmode="decimal" value="${esc(it.weight)}" placeholder="—" autocomplete="off"></label>
         <label class="pi-l">Повт<input class="pi-reps" inputmode="decimal" value="${esc(it.reps)}" placeholder="—" autocomplete="off"></label>
         <label class="pi-l">Подх<input class="pi-sets" inputmode="decimal" value="${esc(it.sets)}" placeholder="—" autocomplete="off"></label>
-        <label class="pi-l">Вес, кг<input class="pi-weight" inputmode="decimal" value="${esc(it.weight)}" placeholder="—" autocomplete="off"></label>
         <label class="pi-l">Мин<input class="pi-time" inputmode="decimal" value="${esc(it.time)}" placeholder="—" autocomplete="off"></label>
       </div>
       <input class="pi-notes" value="${esc(it.notes)}" placeholder="Заметка (необязательно)" autocomplete="off">
@@ -1698,7 +1698,7 @@ function saveDay(){
   if(!p){ closeModal(); return; }
   const name=cleanName(D.name);
   if(!name){ markBad($('#dName'),true); toast('Введите название тренировки'); return; }
-  const LIM=[['.pi-reps','reps'],['.pi-sets','sets'],['.pi-weight','weight'],['.pi-time','time']];
+  const LIM=[['.pi-weight','weight'],['.pi-reps','reps'],['.pi-sets','sets'],['.pi-time','time']];
   const items=[]; let bad=false;
   $$('#dItems .pi').forEach(el=>{
     const g=c=>el.querySelector(c);
@@ -1712,7 +1712,7 @@ function saveDay(){
     items.push({name:nm, reps:num(g('.pi-reps').value), sets:num(g('.pi-sets').value), weight:num(g('.pi-weight').value),
       time:minOut(g('.pi-time').value), notes:g('.pi-notes').value.trim()});
   });
-  if(bad){ toast('Проверьте выделенные поля: нужно название; повторы и подходы — до 10 000, вес — до 100 000 кг, время — до 6 000 мин', null, null, 5000, 'alert'); return; }
+  if(bad){ toast('Проверьте выделенные поля: нужно название; вес — до 100 000 кг, повторы и подходы — до 10 000, время — до 6 000 мин', null, null, 5000, 'alert'); return; }
   const final=items.map(it=>({exId:getOrCreateEx(it.name).id, reps:it.reps, sets:it.sets, weight:it.weight, time:it.time, notes:it.notes}));
   let target=p.folders.find(f=>f.id===D.folderId) || p.folders[0];
   if(!target){ target={id:nid('prog'), name:'Неделя 1', days:[]}; p.folders.push(target); }
@@ -1932,8 +1932,8 @@ function openDataSheet(){
 
 /* ---- выгрузка ---- */
 function dec(v){ return v==null||v==='' ? '' : String(v).replace('.',','); }
-const EXPORT_HEAD=['Дата','День','Время','Тренировка','Упражнение','Повторения','Подходы','Вес, кг','Тоннаж, кг','Время, мин','Заметки','Начало тренировки','Длительность, мин','Отдых, мин'];
-const PROG_HEAD=['Программа','Папка','Тренировка','Упражнение','Повторения','Подходы','Вес, кг','Время, мин','Заметки'];
+const EXPORT_HEAD=['Дата','День','Время','Тренировка','Упражнение','Вес, кг','Повторения','Подходы','Тоннаж, кг','Время, мин','Заметки','Начало тренировки','Длительность, мин','Отдых, мин'];
+const PROG_HEAD=['Программа','Папка','Тренировка','Упражнение','Вес, кг','Повторения','Подходы','Время, мин','Заметки'];
 
 function recWorkouts(){ return DB.workouts.filter(w=>DB.records.some(r=>r.wId===w.id)).sort((a,b)=>a.start-b.start); }
 
@@ -1949,7 +1949,7 @@ function buildRows(){
       const ex=exById(r.exId), d=new Date(r.ts), t=ton(r);
       rows.push([
         fmtDate(r.ts), WD[d.getDay()], fmtTime(r.ts), n, ex?ex.name:'?',
-        dec(r.reps), dec(r.sets), dec(r.weight), t?dec(round(t,2)):'', r.time?dec(round(r.time/60,2)):'', r.notes||'',
+        dec(r.weight), dec(r.reps), dec(r.sets), t?dec(round(t,2)):'', r.time?dec(round(r.time/60,2)):'', r.notes||'',
         j===0 ? fmtTime(w.start) : '',
         j===0 && dur ? dec(round(dur/60,1)) : '',
         j===0 && w.rest ? dec(round(w.rest/60,1)) : ''
@@ -1971,7 +1971,7 @@ function buildProgramRows(progs){
         if(!d.items.length){ rows.push([p.name,f.name,d.name,'','','','','','']); return; }
         d.items.forEach(it=>{
           const e=exById(it.exId);
-          rows.push([p.name, f.name, d.name, e?e.name:'?', dec(it.reps), dec(it.sets), dec(it.weight),
+          rows.push([p.name, f.name, d.name, e?e.name:'?', dec(it.weight), dec(it.reps), dec(it.sets),
             it.time?dec(round(it.time/60,2)):'', it.notes||'']);
         });
       });
@@ -1981,18 +1981,18 @@ function buildProgramRows(progs){
 }
 function templateRows(){
   return [PROG_HEAD,
-    ['Моя программа','Неделя 1','Верх','Жим лёжа','10','3','60','',''],
-    ['','','','Тяга штанги в наклоне','10','3','50','',''],
-    ['','','','Жим гантелей сидя','12','3','20','',''],
+    ['Моя программа','Неделя 1','Верх','Жим лёжа','60','10','3','',''],
+    ['','','','Тяга штанги в наклоне','50','10','3','',''],
+    ['','','','Жим гантелей сидя','20','12','3','',''],
     ['','','Низ','Велосипед','','','','10','разминка'],
-    ['','','','Приседания','8','4','80','',''],
-    ['','','','Румынская тяга','10','3','70','',''],
-    ['','Неделя 2','Верх','Жим лёжа','10','3','62,5','','+2,5 кг'],
-    ['','','','Тяга штанги в наклоне','10','3','52,5','',''],
-    ['','','','Жим гантелей сидя','12','3','22','',''],
+    ['','','','Приседания','80','8','4','',''],
+    ['','','','Румынская тяга','70','10','3','',''],
+    ['','Неделя 2','Верх','Жим лёжа','62,5','10','3','','+2,5 кг'],
+    ['','','','Тяга штанги в наклоне','52,5','10','3','',''],
+    ['','','','Жим гантелей сидя','22','12','3','',''],
     ['','','Низ','Велосипед','','','','10','разминка'],
-    ['','','','Приседания','8','4','85','',''],
-    ['','','','Румынская тяга','10','3','72,5','','']];
+    ['','','','Приседания','85','8','4','',''],
+    ['','','','Румынская тяга','72,5','10','3','','']];
 }
 function toDelimited(rows, sep){
   return rows.map(r=>r.map(c=>{
@@ -2035,7 +2035,7 @@ function openProgExport(ids, template){
   const what = template ? 'Пример программы на две недели. Заполните таблицу в Excel / Numbers, сохраните как CSV и загрузите на вкладке «Программы» → «Загрузить».'
     : progs.length===1 ? `Программа «${esc(progs[0].name)}».` : `${progs.length} ${plural(progs.length,'программа','программы','программ')}.`;
   openModal(`<div class="sheet-head"><h2>${title}</h2>${closeX()}</div>
-    <p class="muted">${what} Одна строка — одно упражнение. Колонки: Программа, Папка, Тренировка, Упражнение, Повторения, Подходы, Вес, Время (мин), Заметки. Пустые ячейки в первых трёх колонках берутся из строки выше.</p>
+    <p class="muted">${what} Одна строка — одно упражнение. Колонки: Программа, Папка, Тренировка, Упражнение, Вес, Повторения, Подходы, Время (мин), Заметки. Пустые ячейки в первых трёх колонках берутся из строки выше.</p>
     ${exportButtons()}`);
 }
 function exportPayload(){
