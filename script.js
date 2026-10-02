@@ -102,13 +102,15 @@ function fromInputDT(s){
    exercises: {id, name}
    records:   {id, exId, wId, ts, reps, sets, weight, time, notes}   — одна запись = одно упражнение (N повт × M подходов × вес)
    workouts:  {id, start, end, timed, rest}                          — timed=true, если длительность замерена таймером
-   active:    {wId, restEnd, restTotal}                              — идущая тренировка и таймер отдыха
+   active:    {wId, restEnd, restTotal, plan}                        — идущая тренировка, таймер отдыха, план {dayId}
+   programs:  {id, name, folders:[{id, name, days:[{id, name, items:[{exId, reps, sets, weight, time, notes}]}]}]}
+              — id программ, папок и тренировок берутся из одного счётчика seq.prog
 */
 function emptyDB(){
   return {
-    v:4, exercises:[], records:[], workouts:[],
-    seq:{ex:0, rec:0, w:0},
-    active:{wId:null, restEnd:null, restTotal:0},
+    v:4, exercises:[], records:[], workouts:[], programs:[],
+    seq:{ex:0, rec:0, w:0, prog:0},
+    active:{wId:null, restEnd:null, restTotal:0, plan:null},
     lastExport:0
   };
 }
@@ -145,7 +147,8 @@ function normalize(d){
         notes:r.notes?String(r.notes):''})),
     workouts: (Array.isArray(d.workouts)?d.workouts:[])
       .filter(w=>w && w.start)
-      .map(w=>({id:+w.id, start:+w.start, end:w.end?+w.end:null, timed:!!w.timed, rest:Math.max(0,+w.rest||0)})),
+      .map(w=>({id:+w.id, start:+w.start, end:w.end?+w.end:null, timed:!!w.timed, rest:Math.max(0,+w.rest||0), plan:w.plan?String(w.plan):''})),
+    programs: normPrograms(d.programs),
     seq: Object.assign({}, base.seq, d.seq||{}),
     active: Object.assign({}, base.active, d.active||{}),
     lastExport: +d.lastExport || 0
@@ -154,14 +157,28 @@ function normalize(d){
   out.seq.ex  = Math.max(+out.seq.ex||0,  maxId(out.exercises));
   out.seq.rec = Math.max(+out.seq.rec||0, maxId(out.records));
   out.seq.w   = Math.max(+out.seq.w||0,   maxId(out.workouts));
+  let maxP=0;
+  out.programs.forEach(p=>{ maxP=Math.max(maxP,p.id); p.folders.forEach(f=>{ maxP=Math.max(maxP,f.id); f.days.forEach(x=>{ maxP=Math.max(maxP,x.id); }); }); });
+  out.seq.prog = Math.max(+out.seq.prog||0, maxP);
   if(out.active.wId && !out.workouts.some(w=>w.id===+out.active.wId)) out.active.wId=null;
   if(out.active.wId) out.active.wId=+out.active.wId;
   if(!out.active.wId){ out.active.restEnd=null; out.active.restTotal=0; }
+  const pl=out.active.plan;
+  out.active.plan = (out.active.wId && pl && out.programs.some(p=>p.folders.some(f=>f.days.some(x=>x.id===+pl.dayId)))) ? {dayId:+pl.dayId} : null;
   out.workouts.forEach(w=>{
     if(w.id===out.active.wId){ w.end=null; w.timed=true; }
     else if(w.timed && !w.end) w.timed=false;
   });
   return out;
+}
+
+function normPrograms(arr){
+  const A=x=>Array.isArray(x)?x:[];
+  return A(arr).filter(p=>p && cleanName(p.name)).map(p=>({id:+p.id, name:cleanName(p.name),
+    folders:A(p.folders).filter(f=>f && cleanName(f.name)).map(f=>({id:+f.id, name:cleanName(f.name),
+      days:A(f.days).filter(x=>x && cleanName(x.name)).map(x=>({id:+x.id, name:cleanName(x.name),
+        items:A(x.items).filter(it=>it && it.exId!=null).map(it=>({exId:+it.exId,
+          reps:num(it.reps), sets:num(it.sets), weight:num(it.weight), time:num(it.time), notes:it.notes?String(it.notes):''}))}))}))}));
 }
 
 // перенос данных из прошлой версии (fitness_v3: логи по одной метрике)
@@ -347,7 +364,7 @@ let curView='record';
 function showView(v){
   $$('.view').forEach(x=>x.classList.add('hidden'));
   $('#view-'+v).classList.remove('hidden');
-  const tab = v==='history' ? 'ex' : v;
+  const tab = v==='history' ? 'ex' : v==='program' ? 'prog' : v;
   $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   curView=v;
   $('#scroller').scrollTop=0;
@@ -358,6 +375,8 @@ function refresh(){
   else if(curView==='ex') renderExList();
   else if(curView==='history') renderHistory();
   else if(curView==='stats') renderStats();
+  else if(curView==='prog') renderProgList();
+  else if(curView==='program') renderProgram();
 }
 
 /* ================== ЭКРАН «ЗАПИСЬ» ================== */
@@ -367,6 +386,7 @@ const NUM_FIELDS=['mReps','mSets','mWeight','mTime'];
 
 function renderRecord(){
   renderWorkoutBar();
+  renderPlan();
   renderLastHint();
   renderToday();
 }
@@ -570,6 +590,7 @@ async function stopWorkout(){
   if(DB.active.restEnd) cancelRest();
   const w=activeW();
   DB.active.wId=null;
+  DB.active.plan=null;
   let had=false;
   if(w){ w.end=Date.now(); w.timed=true; had=DB.records.some(r=>r.wId===w.id); }
   cleanupWorkouts(); save();
@@ -968,6 +989,7 @@ async function renameEx(){
     const n=DB.records.filter(r=>r.exId===ex.id).length;
     if(!await ask(`Упражнение «${esc(other.name)}» уже есть. Объединить? ${n} ${plural(n,'запись','записи','записей')} из «${esc(ex.name)}» перейдут в него.`,'Объединить')) return;
     DB.records.forEach(r=>{ if(r.exId===ex.id) r.exId=other.id; });
+    forEachItem(it=>{ if(it.exId===ex.id) it.exId=other.id; });
     DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
     save(); closeModal();
     if(formHad){ exInput.value=other.name; }
@@ -984,8 +1006,10 @@ async function renameEx(){
 async function deleteEx(){
   const ex=exById(histEx); if(!ex) return;
   const n=DB.records.filter(r=>r.exId===ex.id).length;
-  if(!await ask(`Удалить упражнение «${esc(ex.name)}»${n?` и ${plural(n,'его','все его','все его')} ${n} ${plural(n,'запись','записи','записей')}`:''}? Отменить будет нельзя.`,'Удалить',true)) return;
+  let inProg=0; forEachItem(it=>{ if(it.exId===ex.id) inProg++; });
+  if(!await ask(`Удалить упражнение «${esc(ex.name)}»${n?` и ${plural(n,'его','все его','все его')} ${n} ${plural(n,'запись','записи','записей')}`:''}?${inProg?` Оно также уберётся из программ (${inProg} ${plural(inProg,'раз','раза','раз')}).`:''} Отменить будет нельзя.`,'Удалить',true)) return;
   DB.records=DB.records.filter(r=>r.exId!==ex.id);
+  DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>{ d.items=d.items.filter(it=>it.exId!==ex.id); })));
   DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
   cleanupWorkouts(); save();
   closeModal();
@@ -1008,7 +1032,8 @@ function openWorkout(id){
   recs.forEach(r=>{ if(!by.has(r.exId)){ by.set(r.exId,[]); order.push(r.exId); } by.get(r.exId).push(r); });
 
   let html=`<div class="sheet-head"><h2>Тренировка #${workoutNumber(id)}</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
-    <div class="muted" style="margin-bottom:12px">${WD[d.getDay()]}, ${fmtDate(w.start)} · ${fmtTime(w.start)}${isActive(w)?' · <span class="badge">идёт</span>':''}</div>
+    <div class="muted" style="margin-bottom:${w.plan?4:12}px">${WD[d.getDay()]}, ${fmtDate(w.start)} · ${fmtTime(w.start)}${isActive(w)?' · <span class="badge">идёт</span>':''}</div>
+    ${w.plan?`<div class="workout-plan" style="margin-bottom:12px">${I('clip','sm')}${esc(w.plan)}</div>`:''}
     <div class="stats-summary">
       <div class="stats-box"><div class="lbl">${I('clock','sm')}Длительность</div><div class="val">${dur?fmtDur(dur):'—'}</div></div>
       <div class="stats-box"><div class="lbl">${I('pause','sm')}Отдых</div><div class="val">${w.rest?fmtDur(w.rest):'—'}</div></div>
@@ -1024,7 +1049,8 @@ function openWorkout(id){
     </div>`;
   }).join('');
   if(!recs.length) html+='<div class="empty">Записей пока нет</div>';
-  html+=`<div class="grid2" style="margin-top:16px">
+  if(recs.length) html+=`<button class="btn ghost big" style="margin-top:16px" data-act="w-toprog" data-id="${w.id}">${I('clip')}Добавить в программу</button>`;
+  html+=`<div class="grid2" style="margin-top:${recs.length?10:16}px">
     ${isActive(w)?'<button class="btn ghost" data-act="close-modal">Закрыть</button>':`<button class="btn ghost" data-act="w-edit" data-id="${w.id}">${I('edit')}Дата и время</button>`}
     <button class="btn danger" data-act="w-del" data-id="${w.id}">${I('trash')}Удалить</button>
   </div>`;
@@ -1070,7 +1096,7 @@ async function deleteWorkout(id){
   if(!await ask(`Удалить тренировку${n?` и ${n} ${plural(n,'запись','записи','записей')}`:''}? Отменить будет нельзя.`,'Удалить',true)) return;
   if(isActive(w)){
     DB.active.restEnd=null; DB.active.restTotal=0; hideRest();
-    DB.active.wId=null;
+    DB.active.wId=null; DB.active.plan=null;
   }
   DB.records=DB.records.filter(r=>r.wId!==id);
   DB.workouts=DB.workouts.filter(x=>x.id!==id);
@@ -1126,6 +1152,7 @@ function cardsHtml(ws){
         <div class="workout-date">${WD[d.getDay()]}, ${fmtDM(w.start)} · ${fmtTime(w.start)}</div>
         <div class="workout-num">${isActive(w)?'<span class="badge">идёт</span>':'#'+n}</div>
       </div>
+      ${w.plan?`<div class="workout-plan">${I('clip','sm')}${esc(w.plan)}</div>`:''}
       <div class="workout-ex">${esc(names.join(', '))||'—'}</div>
       <div class="workout-meta">${meta.join(' · ')}</div>
     </div>`;
@@ -1175,27 +1202,559 @@ function tableHtml(ws){
     <tbody>${rows}</tbody></table>`;
 }
 
+/* ================== ПРОГРАММЫ: МОДЕЛЬ ================== */
+function allDays(){ const out=[]; DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>out.push({p,f,d})))); return out; }
+function findDay(id){ return allDays().find(x=>x.d.id===id) || null; }
+function progById(id){ return DB.programs.find(p=>p.id===id); }
+function findFolder(id){ for(const p of DB.programs) for(const f of p.folders) if(f.id===id) return {p,f}; return null; }
+function forEachItem(fn){ DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>d.items.forEach(fn)))); }
+function progStats(p){
+  let days=0, items=0;
+  p.folders.forEach(f=>{ days+=f.days.length; f.days.forEach(d=>{ items+=d.items.length; }); });
+  return {folders:p.folders.length, days, items};
+}
+function hasPlanDays(){ return DB.programs.some(p=>p.folders.some(f=>f.days.length)); }
+function validatePlan(){
+  if(DB.active.plan && (!DB.active.wId || !findDay(DB.active.plan.dayId))) DB.active.plan=null;
+}
+// упражнения, на которые ссылаются программы, должны существовать
+function fixProgramRefs(){
+  const ids=new Set(DB.exercises.map(e=>e.id));
+  DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>{ d.items=d.items.filter(it=>ids.has(it.exId)); })));
+  validatePlan();
+}
+// «Неделя 1» → «Неделя 2», «Верх» → «Верх 2»; результат не совпадает ни с одним именем из list
+function nextName(name, list){
+  const taken=new Set((list||[]).map(normKey));
+  let nm=name;
+  do{
+    const m=nm.match(/^(.*?)(\d+)(\D*)$/);
+    nm = m ? m[1]+(+m[2]+1)+m[3] : nm+' 2';
+  }while(taken.has(normKey(nm)));
+  return nm;
+}
+function uniqueName(name, list){
+  return (list||[]).some(x=>normKey(x)===normKey(name)) ? nextName(name, list) : name;
+}
+function copyItems(items){ return items.map(it=>Object.assign({}, it)); }
+function cloneFolder(f, name){
+  return {id:nid('prog'), name, days:f.days.map(d=>({id:nid('prog'), name:d.name, items:copyItems(d.items)}))};
+}
+const closeX = () => `<button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button>`;
+
+/* ---- универсальный ввод названия ---- */
+let nameCb=null;
+function openNameSheet(title, value, placeholder, cb, okLabel){
+  nameCb=cb;
+  openModal(`<h2>${esc(title)}</h2>
+    <input id="nameInp" value="${esc(value||'')}" placeholder="${esc(placeholder||'')}" autocomplete="off" autocapitalize="sentences" data-enter="name-save">
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn ghost" data-act="close-modal">Отмена</button>
+      <button class="btn" data-act="name-save">${esc(okLabel||'Сохранить')}</button>
+    </div>`);
+  const i=$('#nameInp'); i.focus(); try{ i.setSelectionRange(0,i.value.length); }catch(e){}
+}
+function nameSave(){
+  const inp=$('#nameInp'); if(!inp) return;
+  const v=cleanName(inp.value);
+  if(!v){ markBad(inp,true); toast('Введите название'); return; }
+  const cb=nameCb; nameCb=null;
+  closeModal();
+  if(cb) cb(v);
+}
+
+/* ================== ПРОГРАММЫ: ЭКРАНЫ ================== */
+let curProg=null;
+
+function renderProgList(){
+  const box=$('#progList');
+  const tools=`<div class="data-row">
+      <button class="btn ghost sm" data-act="import">${I('download')}Загрузить</button>
+      ${DB.programs.length
+        ? `<button class="btn ghost sm" data-act="prog-export-all">${I('upload')}Выгрузить все</button>`
+        : `<button class="btn ghost sm" data-act="prog-template">${I('copy')}Шаблон для Excel</button>`}
+    </div>`;
+  if(!DB.programs.length){
+    box.innerHTML=tools+`<div class="empty">Пока нет программ.<br>Нажмите +, чтобы создать программу, добавьте прошедшую тренировку из «Статистики» или загрузите таблицу.</div>`;
+    return;
+  }
+  const live=DB.active.plan ? findDay(DB.active.plan.dayId) : null;
+  box.innerHTML=tools+DB.programs.map(p=>{
+    const s=progStats(p);
+    return `<div class="ex-item" data-act="prog-open" data-id="${p.id}">
+      <div class="ex-text"><div class="name">${esc(p.name)}${live && live.p===p?' <span class="badge">идёт</span>':''}</div>
+        <div class="count">${s.folders} ${plural(s.folders,'папка','папки','папок')} · ${s.days} ${plural(s.days,'тренировка','тренировки','тренировок')}</div></div>
+      <div class="chev">${I('chev')}</div></div>`;
+  }).join('');
+}
+
+function openProgram(id){ curProg=id; showView('program'); renderProgram(); }
+
+function renderProgram(){
+  const p=progById(curProg);
+  if(!p){ curProg=null; go('prog'); return; }
+  $('#progTitle').textContent=p.name;
+  const liveId=DB.active.plan ? DB.active.plan.dayId : null;
+  let html='';
+  if(!p.folders.length) html+='<div class="empty">В программе пока нет папок.<br>Папка — это, например, «Неделя 1».</div>';
+  p.folders.forEach(f=>{
+    html+=`<div class="folder-head"><span>${I('folder')}${esc(f.name)}</span>
+      <button class="icon-btn sm" data-act="folder-menu" data-id="${f.id}" aria-label="Действия с папкой">${I('more')}</button></div>
+      <div class="card list-card">`;
+    f.days.forEach(d=>{
+      const names=d.items.map(it=>{ const e=exById(it.exId); return e?e.name:'?'; });
+      html+=`<div class="rec-row" data-act="day-open" data-id="${d.id}">
+        <div class="rec-main"><div class="rec-name">${esc(d.name)}${d.id===liveId?' <span class="badge">идёт</span>':''}</div>
+          <div class="rec-desc day-names">${d.items.length} упр.${names.length?' · '+esc(names.join(', ')):''}</div></div>
+        <div class="chev">${I('chev')}</div></div>`;
+    });
+    html+=`<div class="rec-row add-row" data-act="day-add" data-id="${f.id}">${I('plus')}Добавить тренировку</div></div>`;
+  });
+  html+=`<button class="btn ghost big" data-act="folder-add">${I('folder')}Новая папка</button>`;
+  $('#progBody').innerHTML=html;
+}
+
+function openProgMenu(){
+  const p=progById(curProg); if(!p) return;
+  openModal(`<h2>${esc(p.name)}</h2>
+    <button class="btn ghost big" data-act="prog-rename">${I('edit')}Переименовать</button>
+    <button class="btn ghost big" data-act="folder-add">${I('folder')}Новая папка</button>
+    <button class="btn ghost big" data-act="prog-copy">${I('copy')}Сделать копию программы</button>
+    <button class="btn ghost big" data-act="prog-export" data-id="${p.id}">${I('upload')}Выгрузить программу</button>
+    <button class="btn danger big" data-act="prog-del">${I('trash')}Удалить программу</button>
+    <button class="btn ghost big" data-act="close-modal">Отмена</button>`);
+}
+function newProgram(){
+  openNameSheet('Новая программа', '', 'Например: Верх / Низ', name=>{
+    const p={id:nid('prog'), name:uniqueName(name, DB.programs.map(x=>x.name)), folders:[{id:nid('prog'), name:'Неделя 1', days:[]}]};
+    DB.programs.push(p); save();
+    openProgram(p.id);
+  }, 'Создать');
+}
+function renameProgram(){
+  const p=progById(curProg); if(!p) return;
+  openNameSheet('Переименовать программу', p.name, '', name=>{
+    p.name=uniqueName(name, DB.programs.filter(x=>x!==p).map(x=>x.name));
+    save(); renderProgram(); toast('Переименовано');
+  });
+}
+function copyProgram(){
+  const p=progById(curProg); if(!p) return;
+  const c={id:nid('prog'), name:nextName(p.name, DB.programs.map(x=>x.name)), folders:p.folders.map(f=>cloneFolder(f, f.name))};
+  DB.programs.splice(DB.programs.indexOf(p)+1, 0, c);
+  save(); closeModal(); openProgram(c.id);
+  toast('Создана копия программы', null, null, null, 'check');
+}
+async function deleteProgram(){
+  const p=progById(curProg); if(!p) return;
+  const s=progStats(p);
+  if(!await ask(`Удалить программу «${esc(p.name)}» (${s.days} ${plural(s.days,'тренировка','тренировки','тренировок')})? Записи о проведённых тренировках останутся.`,'Удалить',true)) return;
+  DB.programs=DB.programs.filter(x=>x!==p);
+  validatePlan(); save(); closeModal();
+  curProg=null; go('prog');
+  toast('Программа удалена');
+}
+
+/* ---- папки ---- */
+function addFolder(){
+  const p=progById(curProg); if(!p) return;
+  const names=p.folders.map(f=>f.name), last=p.folders[p.folders.length-1];
+  openNameSheet('Новая папка', last ? nextName(last.name, names) : 'Неделя 1', 'Например: Неделя 2', name=>{
+    p.folders.push({id:nid('prog'), name:uniqueName(name, names), days:[]});
+    save(); renderProgram();
+  }, 'Создать');
+}
+function openFolderMenu(fid){
+  const x=findFolder(fid); if(!x) return;
+  const i=x.p.folders.indexOf(x.f), n=x.p.folders.length;
+  openModal(`<h2>${esc(x.f.name)}</h2>
+    <button class="btn ghost big" data-act="day-add" data-id="${fid}">${I('plus')}Добавить тренировку</button>
+    <button class="btn ghost big" data-act="folder-rename" data-id="${fid}">${I('edit')}Переименовать</button>
+    <button class="btn ghost big" data-act="folder-dup" data-id="${fid}">${I('copy')}Дублировать папку</button>
+    ${n>1?`<div class="grid2" style="margin-top:10px">
+      <button class="btn ghost" data-act="folder-move" data-id="${fid}" data-d="-1"${i===0?' disabled':''}>${I('up')}Выше</button>
+      <button class="btn ghost" data-act="folder-move" data-id="${fid}" data-d="1"${i===n-1?' disabled':''}>${I('down')}Ниже</button>
+    </div>`:''}
+    <button class="btn danger big" data-act="folder-del" data-id="${fid}">${I('trash')}Удалить папку</button>
+    <button class="btn ghost big" data-act="close-modal">Отмена</button>`);
+}
+function renameFolder(fid){
+  const x=findFolder(fid); if(!x) return;
+  openNameSheet('Переименовать папку', x.f.name, '', name=>{
+    x.f.name=uniqueName(name, x.p.folders.filter(f=>f!==x.f).map(f=>f.name));
+    save(); renderProgram();
+  });
+}
+function dupFolder(fid){
+  const x=findFolder(fid); if(!x) return;
+  const c=cloneFolder(x.f, nextName(x.f.name, x.p.folders.map(f=>f.name)));
+  x.p.folders.splice(x.p.folders.indexOf(x.f)+1, 0, c);
+  save(); closeModal(); renderProgram();
+  toast(`Создана папка «${c.name}» — поменяйте в ней веса`, null, null, 4000, 'check');
+}
+function moveFolder(fid, d){
+  const x=findFolder(fid); if(!x) return;
+  const a=x.p.folders, i=a.indexOf(x.f), k=i+d;
+  if(k<0 || k>=a.length) return;
+  [a[i],a[k]]=[a[k],a[i]];
+  save(); renderProgram(); openFolderMenu(fid);
+}
+async function deleteFolder(fid){
+  const x=findFolder(fid); if(!x) return;
+  const n=x.f.days.length;
+  if(n && !await ask(`Удалить папку «${esc(x.f.name)}» и ${n} ${plural(n,'тренировку','тренировки','тренировок')} в ней?`,'Удалить',true)) return;
+  x.p.folders.splice(x.p.folders.indexOf(x.f), 1);
+  validatePlan(); save(); closeModal(); renderProgram();
+  toast('Папка удалена');
+}
+
+/* ---- тренировка программы ---- */
+function openDay(id){
+  const x=findDay(id);
+  if(!x){ closeModal(); return; }
+  const {p,f,d}=x;
+  const live=DB.active.plan && DB.active.plan.dayId===id;
+  const list = d.items.length
+    ? `<div class="card list-card sheet-list">${d.items.map((it,i)=>{
+        const e=exById(it.exId);
+        return `<div class="rec-row" data-act="day-edit" data-id="${d.id}">
+          <span class="plan-mark">${i+1}</span>
+          <div class="rec-main"><div class="rec-name">${esc(e?e.name:'?')}</div>
+            <div class="rec-desc">${esc(describe(it))||'—'}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
+        </div>`;
+      }).join('')}</div>`
+    : '<div class="empty" style="padding:20px 10px">Упражнений пока нет — нажмите «Изменить»</div>';
+  openModal(`<div class="sheet-head"><h2>${esc(d.name)}</h2>${closeX()}</div>
+    <div class="muted" style="margin-bottom:12px">${esc(p.name)} · ${esc(f.name)}</div>
+    ${list}
+    <button class="btn ok big" data-act="plan-start" data-id="${d.id}"${d.items.length?'':' disabled'}>${I('play')}${live?'Продолжить тренировку':'Начать тренировку'}</button>
+    <div class="grid2" style="margin-top:10px">
+      <button class="btn ghost" data-act="day-edit" data-id="${d.id}">${I('edit')}Изменить</button>
+      <button class="btn ghost" data-act="day-dup" data-id="${d.id}">${I('copy')}Копия</button>
+    </div>
+    <button class="btn danger big" data-act="day-del" data-id="${d.id}">${I('trash')}Удалить из программы</button>`);
+}
+function dupDay(id){
+  const x=findDay(id); if(!x) return;
+  const c={id:nid('prog'), name:nextName(x.d.name, x.f.days.map(d=>d.name)), items:copyItems(x.d.items)};
+  x.f.days.splice(x.f.days.indexOf(x.d)+1, 0, c);
+  save(); refresh(); openDay(c.id);
+  toast('Создана копия', null, null, null, 'check');
+}
+async function deleteDay(id){
+  const x=findDay(id); if(!x) return;
+  if(!await ask(`Удалить тренировку «${esc(x.d.name)}» из программы?`,'Удалить',true)) return;
+  x.f.days.splice(x.f.days.indexOf(x.d), 1);
+  validatePlan(); save(); closeModal(); refresh();
+  toast('Удалено');
+}
+
+/* ---- редактор тренировки программы ---- */
+let dayDraft=null;
+function emptyItem(){ return {name:'', reps:'', sets:'', weight:'', time:'', notes:''}; }
+function openDayEdit(id, folderId){
+  const x=id ? findDay(id) : null;
+  if(id && !x) return;
+  const fx = x ? {p:x.p, f:x.f} : findFolder(folderId);
+  if(!fx) return;
+  dayDraft={
+    id:id||null, progId:fx.p.id, folderId:fx.f.id,
+    name: x ? x.d.name : nextName('Тренировка '+fx.f.days.length, fx.f.days.map(d=>d.name)),
+    items: x ? x.d.items.map(it=>{ const e=exById(it.exId);
+      return {name:e?e.name:'', reps:inVal(it.reps), sets:inVal(it.sets), weight:inVal(it.weight), time:minIn(it.time), notes:it.notes||''}; }) : []
+  };
+  if(!dayDraft.items.length) dayDraft.items.push(emptyItem());
+  renderDayEdit(x ? null : 0);
+}
+function renderDayEdit(focusIdx){
+  const D=dayDraft, p=D && progById(D.progId);
+  if(!p){ closeModal(); return; }
+  const fOpts=p.folders.map(f=>`<option value="${f.id}"${f.id===D.folderId?' selected':''}>${esc(f.name)}</option>`).join('');
+  const dl=DB.exercises.slice().sort((a,b)=>a.name.localeCompare(b.name,'ru')).map(e=>`<option value="${esc(e.name)}"></option>`).join('');
+  const n=D.items.length;
+  const items=D.items.map((it,i)=>`<div class="pi" data-i="${i}">
+      <div class="pi-head"><span class="pi-num">${i+1}</span>
+        <input class="pi-name" list="exDL" value="${esc(it.name)}" placeholder="Упражнение" autocomplete="off" autocapitalize="sentences">
+        <button type="button" class="pi-btn" data-act="di-move" data-i="${i}" data-d="-1"${i===0?' disabled':''} aria-label="Выше">${I('up')}</button>
+        <button type="button" class="pi-btn" data-act="di-move" data-i="${i}" data-d="1"${i===n-1?' disabled':''} aria-label="Ниже">${I('down')}</button>
+        <button type="button" class="pi-btn" data-act="di-del" data-i="${i}" aria-label="Убрать">${I('trash')}</button>
+      </div>
+      <div class="pi-grid">
+        <label class="pi-l">Повт<input class="pi-reps" inputmode="decimal" value="${esc(it.reps)}" placeholder="—" autocomplete="off"></label>
+        <label class="pi-l">Подх<input class="pi-sets" inputmode="decimal" value="${esc(it.sets)}" placeholder="—" autocomplete="off"></label>
+        <label class="pi-l">Вес, кг<input class="pi-weight" inputmode="decimal" value="${esc(it.weight)}" placeholder="—" autocomplete="off"></label>
+        <label class="pi-l">Мин<input class="pi-time" inputmode="decimal" value="${esc(it.time)}" placeholder="—" autocomplete="off"></label>
+      </div>
+      <input class="pi-notes" value="${esc(it.notes)}" placeholder="Заметка (необязательно)" autocomplete="off">
+    </div>`).join('');
+  const sh=$('#modalSheet'), keep=$('#modal').classList.contains('show') && $('#dItems') ? sh.scrollTop : 0;
+  openModal(`<div class="sheet-head"><h2>${D.id?'Изменить тренировку':'Новая тренировка'}</h2>
+      <button class="icon-btn" data-act="day-edit-cancel" aria-label="Закрыть">${I('x')}</button></div>
+    <label for="dName">Название</label>
+    <input id="dName" value="${esc(D.name)}" autocomplete="off" autocapitalize="sentences">
+    ${p.folders.length>1?`<label for="dFolder">Папка</label><select id="dFolder">${fOpts}</select>`:''}
+    <label>Упражнения</label>
+    <div id="dItems">${items}</div>
+    <datalist id="exDL">${dl}</datalist>
+    <button class="btn ghost big" data-act="di-add">${I('plus')}Добавить упражнение</button>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn ghost" data-act="day-edit-cancel">Отмена</button>
+      <button class="btn" data-act="day-save">Сохранить</button>
+    </div>`);
+  sh.scrollTop=keep;
+  if(focusIdx!=null){
+    const el=$$('#dItems .pi')[focusIdx];
+    if(el){ try{ el.scrollIntoView({block:'center'}); }catch(e){} el.querySelector('.pi-name').focus(); }
+  }
+}
+function readDayDraft(){
+  const D=dayDraft; if(!D) return;
+  const n=$('#dName'); if(n) D.name=n.value;
+  const f=$('#dFolder'); if(f) D.folderId=+f.value;
+  D.items=$$('#dItems .pi').map(el=>{
+    const g=c=>el.querySelector(c).value;
+    return {name:g('.pi-name'), reps:g('.pi-reps'), sets:g('.pi-sets'), weight:g('.pi-weight'), time:g('.pi-time'), notes:g('.pi-notes')};
+  });
+}
+function dayItemAdd(){ readDayDraft(); dayDraft.items.push(emptyItem()); renderDayEdit(dayDraft.items.length-1); }
+function dayItemMove(i, d){
+  readDayDraft();
+  const a=dayDraft.items, k=i+d;
+  if(k<0 || k>=a.length) return;
+  [a[i],a[k]]=[a[k],a[i]];
+  renderDayEdit();
+}
+function dayItemDel(i){ readDayDraft(); dayDraft.items.splice(i,1); renderDayEdit(); }
+function dayEditCancel(){
+  const id=dayDraft && dayDraft.id;
+  dayDraft=null;
+  if(id && findDay(id)) openDay(id); else closeModal();
+}
+function saveDay(){
+  readDayDraft();
+  const D=dayDraft; if(!D) return;
+  const p=progById(D.progId);
+  if(!p){ closeModal(); return; }
+  const name=cleanName(D.name);
+  if(!name){ markBad($('#dName'),true); toast('Введите название тренировки'); return; }
+  const LIM=[['.pi-reps','reps'],['.pi-sets','sets'],['.pi-weight','weight'],['.pi-time','time']];
+  const items=[]; let bad=false;
+  $$('#dItems .pi').forEach(el=>{
+    const g=c=>el.querySelector(c);
+    const nm=cleanName(g('.pi-name').value);
+    const empty=!nm && LIM.every(([c])=>!g(c).value.trim()) && !g('.pi-notes').value.trim();
+    if(empty){ LIM.forEach(([c])=>markBad(g(c),false)); markBad(g('.pi-name'),false); return; }
+    let rowBad=false;
+    LIM.forEach(([c,k])=>{ const b=fieldBad(g(c), LIMITS[k]); markBad(g(c), b); if(b) rowBad=true; });
+    markBad(g('.pi-name'), !nm); if(!nm) rowBad=true;
+    if(rowBad){ bad=true; return; }
+    items.push({name:nm, reps:num(g('.pi-reps').value), sets:num(g('.pi-sets').value), weight:num(g('.pi-weight').value),
+      time:minOut(g('.pi-time').value), notes:g('.pi-notes').value.trim()});
+  });
+  if(bad){ toast('Проверьте выделенные поля: нужно название; повторы и подходы — до 10 000, вес — до 100 000 кг, время — до 6 000 мин', null, null, 5000, 'alert'); return; }
+  const final=items.map(it=>({exId:getOrCreateEx(it.name).id, reps:it.reps, sets:it.sets, weight:it.weight, time:it.time, notes:it.notes}));
+  let target=p.folders.find(f=>f.id===D.folderId) || p.folders[0];
+  if(!target){ target={id:nid('prog'), name:'Неделя 1', days:[]}; p.folders.push(target); }
+  let day=null;
+  if(D.id){
+    const x=findDay(D.id);
+    if(x){
+      day=x.d;
+      if(x.f!==target){ x.f.days.splice(x.f.days.indexOf(day),1); target.days.push(day); }
+    }
+  }
+  if(!day){ day={id:nid('prog'), name, items:[]}; target.days.push(day); }
+  day.name=name; day.items=final;
+  dayDraft=null;
+  save(); refresh(); openDay(day.id);
+  toast('Сохранено', null, null, null, 'check');
+}
+
+/* ================== ТРЕНИРОВКА ПО ПРОГРАММЕ (экран «Запись») ================== */
+function planCtx(){
+  const pl=DB.active.plan;
+  if(!pl || !DB.active.wId) return null;
+  return findDay(pl.dayId);
+}
+// какие пункты плана уже сделаны: по числу записей этого упражнения в идущей тренировке
+function planStatus(x){
+  const w=activeW(), cnt=new Map(), used=new Map();
+  (w ? recsOfW(w.id) : []).forEach(r=>cnt.set(r.exId, (cnt.get(r.exId)||0)+1));
+  return x.d.items.map(it=>{
+    const k=(used.get(it.exId)||0)+1; used.set(it.exId, k);
+    return k <= (cnt.get(it.exId)||0);
+  });
+}
+function renderPlan(){
+  const box=$('#planBox'); if(!box) return;
+  const x=planCtx();
+  if(!x){
+    box.innerHTML = hasPlanDays() ? `<button class="btn ghost plan-open" data-act="plan-pick">${I('clip')}Тренировка по программе</button>` : '';
+    return;
+  }
+  const st=planStatus(x), done=st.filter(Boolean).length, next=st.indexOf(false);
+  box.innerHTML=`<div class="card plan-card">
+    <div class="plan-head">
+      <div class="plan-title-wrap"><div class="plan-sub">${esc(x.p.name)} · ${esc(x.f.name)}</div><div class="plan-title">${esc(x.d.name)}</div></div>
+      <div class="plan-count">${done}/${st.length}</div>
+      <button class="icon-btn sm" data-act="plan-close" aria-label="Убрать программу">${I('x')}</button>
+    </div>
+    <div class="progress plan-progress"><div style="width:${st.length?Math.round(done/st.length*100):0}%"></div></div>
+    ${x.d.items.map((it,i)=>{ const e=exById(it.exId);
+      return `<div class="plan-row${st[i]?' done':''}${i===next?' next':''}" data-act="plan-fill" data-i="${i}">
+        <span class="plan-mark">${st[i]?I('check'):(i+1)}</span>
+        <div class="rec-main"><div class="rec-name">${esc(e?e.name:'?')}</div>
+          <div class="rec-desc">${esc(describe(it))||'—'}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
+      </div>`; }).join('')}
+    ${st.length && next<0 ? `<div class="plan-done">${I('flag')}Все упражнения выполнены</div>` : ''}
+  </div>`;
+}
+function openPlanPicker(){
+  let html=`<div class="sheet-head"><h2>Тренировка по программе</h2>${closeX()}</div>`;
+  DB.programs.forEach(p=>{
+    if(!p.folders.some(f=>f.days.length)) return;
+    html+=`<div class="pick-prog">${I('clip')}${esc(p.name)}</div><div class="card list-card sheet-list">`;
+    p.folders.forEach(f=>{
+      if(!f.days.length) return;
+      html+=`<div class="list-day">${esc(f.name)}</div>`;
+      f.days.forEach(d=>{
+        html+=`<div class="rec-row" data-act="day-open" data-id="${d.id}">
+          <div class="rec-main"><div class="rec-name">${esc(d.name)}</div><div class="rec-desc">${d.items.length} упр.</div></div>
+          <div class="chev">${I('chev')}</div></div>`;
+      });
+    });
+    html+='</div>';
+  });
+  openModal(html);
+}
+function startPlan(dayId){
+  const x=findDay(dayId); if(!x) return;
+  if(!DB.active.wId) startWorkout(true);
+  DB.active.plan={dayId};
+  const w=activeW();
+  if(w) w.plan=`${x.p.name} · ${x.f.name} · ${x.d.name}`;
+  save(); closeModal(); go('record');
+  toast(`Тренировка «${x.d.name}» началась`, null, null, null, 'play');
+}
+function closePlan(){
+  DB.active.plan=null; save(); renderPlan();
+  toast('Программа скрыта — тренировка продолжается');
+}
+function fillFromPlan(i){
+  const x=planCtx(); if(!x) return;
+  const it=x.d.items[i]; if(!it) return;
+  const e=exById(it.exId);
+  exInput.value=e ? e.name : '';
+  setVal('mReps',it.reps); setVal('mSets',it.sets); setVal('mWeight',it.weight);
+  $('#mTime').value=minIn(it.time);
+  $('#mNotes').value='';
+  NUM_FIELDS.forEach(id=>markBad($('#'+id),false));
+  hideSuggest(); renderLastHint();
+  try{
+    const sc=$('#scroller'), fc=$('.form-card');
+    sc.scrollBy({top:fc.getBoundingClientRect().top - sc.getBoundingClientRect().top - 64, behavior:'smooth'});
+  }catch(err){}
+}
+
+/* ================== ДОБАВИТЬ ПРОШЕДШУЮ ТРЕНИРОВКУ В ПРОГРАММУ ================== */
+let apState=null, lastProgId=null;
+function openAddToProg(wId){
+  const w=wById(wId); if(!w) return;
+  const recs=recsOfW(wId);
+  if(!recs.length){ toast('В тренировке нет записей'); return; }
+  const def=(lastProgId && progById(lastProgId)) ? lastProgId : (DB.programs[0] ? DB.programs[0].id : 'new');
+  apState={wId};
+  const pOpts=DB.programs.map(p=>`<option value="${p.id}"${p.id===def?' selected':''}>${esc(p.name)}</option>`).join('')
+    + `<option value="new"${def==='new'?' selected':''}>+ Новая программа</option>`;
+  openModal(`<div class="sheet-head"><h2>Добавить в программу</h2>
+      <button class="icon-btn" data-act="w-open" data-id="${wId}" aria-label="Назад">${I('x')}</button></div>
+    <p class="muted">${recs.length} ${plural(recs.length,'упражнение','упражнения','упражнений')} из тренировки #${workoutNumber(wId)} (${fmtDate(w.start)}) — с весами, повторами и подходами.</p>
+    <label for="apProg">Программа</label><select id="apProg">${pOpts}</select>
+    <div id="apProgNewWrap"><label for="apProgName">Название новой программы</label>
+      <input id="apProgName" placeholder="Например: Верх / Низ" autocomplete="off" autocapitalize="sentences"></div>
+    <label for="apFolder">Папка</label><select id="apFolder"></select>
+    <div id="apFolderNewWrap"><label for="apFolderName">Название новой папки</label>
+      <input id="apFolderName" autocomplete="off" autocapitalize="sentences"></div>
+    <label for="apName">Название тренировки</label>
+    <input id="apName" autocomplete="off" autocapitalize="sentences" data-auto="1">
+    <div class="grid2" style="margin-top:16px">
+      <button class="btn ghost" data-act="w-open" data-id="${wId}">Отмена</button>
+      <button class="btn" data-act="ap-save">Добавить</button>
+    </div>`);
+  updateAp(true);
+}
+function updateAp(resetFolder){
+  const ps=$('#apProg'), fs=$('#apFolder'); if(!ps || !fs) return;
+  const p = ps.value==='new' ? null : progById(+ps.value);
+  $('#apProgNewWrap').classList.toggle('hidden', !!p);
+  if(resetFolder){
+    const folders=p ? p.folders : [], last=folders[folders.length-1];
+    fs.innerHTML=folders.map(f=>`<option value="${f.id}"${f===last?' selected':''}>${esc(f.name)}</option>`).join('')+'<option value="new">+ Новая папка</option>';
+    if(!folders.length) fs.value='new';
+    $('#apFolderName').value = last ? nextName(last.name, folders.map(f=>f.name)) : 'Неделя 1';
+  }
+  const f = (p && fs.value!=='new') ? p.folders.find(x=>x.id===+fs.value) : null;
+  $('#apFolderNewWrap').classList.toggle('hidden', !!f);
+  const nm=$('#apName');
+  if(nm.dataset.auto==='1') nm.value = f ? nextName('Тренировка '+f.days.length, f.days.map(d=>d.name)) : 'Тренировка 1';
+}
+function saveAddToProg(){
+  const st=apState; if(!st) return;
+  const w=wById(st.wId); if(!w){ closeModal(); return; }
+  const pv=$('#apProg').value, fv=$('#apFolder').value;
+  let p = pv==='new' ? null : progById(+pv);
+  let newP=false, newF=false;
+  if(!p){
+    const nm=cleanName($('#apProgName').value);
+    if(!nm){ markBad($('#apProgName'),true); toast('Введите название программы'); return; }
+    p={id:0, name:uniqueName(nm, DB.programs.map(x=>x.name)), folders:[]}; newP=true;
+  }
+  let f = (!newP && fv!=='new') ? p.folders.find(x=>x.id===+fv) : null;
+  if(!f){
+    const fn=cleanName($('#apFolderName').value);
+    if(!fn){ markBad($('#apFolderName'),true); toast('Введите название папки'); return; }
+    f={id:0, name:uniqueName(fn, p.folders.map(x=>x.name)), days:[]}; newF=true;
+  }
+  const name=cleanName($('#apName').value);
+  if(!name){ markBad($('#apName'),true); toast('Введите название тренировки'); return; }
+  if(newP){ p.id=nid('prog'); DB.programs.push(p); }
+  if(newF){ f.id=nid('prog'); p.folders.push(f); }
+  f.days.push({id:nid('prog'), name,
+    items:recsOfW(w.id).map(r=>({exId:r.exId, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||''}))});
+  lastProgId=p.id; apState=null;
+  save(); closeModal(); refresh();
+  const pid=p.id;
+  toast(`Добавлено: «${p.name}» → «${f.name}»`, 'Открыть', ()=>openProgram(pid), 4500, 'check');
+}
+
 /* ================== ДАННЫЕ: ВЫГРУЗКА ================== */
 function openDataSheet(){
   const nW=sortedWorkouts().length;
   openModal(`<div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
-    <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}.<br>
+    <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.<br>
     ${DB.lastExport?'Последняя выгрузка: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Выгрузок ещё не было.'}</p>
-    <button class="btn big" data-act="export">${I('upload')}Выгрузить таблицу</button>
+    <button class="btn big" data-act="export">${I('upload')}Выгрузить записи</button>
     <button class="btn ghost big" data-act="import">${I('download')}Загрузить таблицу</button>
     <button class="btn danger big" data-act="clear-all">${I('trash')}Удалить все данные</button>`);
 }
 
 function dec(v){ return v==null||v==='' ? '' : String(v).replace('.',','); }
 const EXPORT_HEAD=['Дата','День','Время','Тренировка','Упражнение','Повторения','Подходы','Вес, кг','Тоннаж, кг','Время, мин','Заметки','Начало тренировки','Длительность, мин','Отдых, мин'];
+const PROG_HEAD=['Программа','Папка','Тренировка','Упражнение','Повторения','Подходы','Вес, кг','Время, мин','Заметки'];
 
-function buildRows(){
+function recWorkouts(){ return DB.workouts.filter(w=>DB.records.some(r=>r.wId===w.id)).sort((a,b)=>a.start-b.start); }
+function dateInputMs(v){ const m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(+m[1],+m[2]-1,+m[3]).getTime() : null; }
+
+// from/to — границы по началу тренировки (мс) или null; номер тренировки сквозной по всем записям
+function buildRows(from, to){
   const rows=[EXPORT_HEAD];
+  const all = from==null && to==null;
   let n=0;
-  DB.workouts.slice().sort((a,b)=>a.start-b.start).forEach(w=>{
-    const recs=recsOfW(w.id);
-    if(!recs.length) return;
+  recWorkouts().forEach(w=>{
     n++;
+    if(from!=null && w.start<from) return;
+    if(to!=null && w.start>to) return;
+    const recs=recsOfW(w.id);
     const dur=isActive(w) ? 0 : wDur(w);
     recs.forEach((r,j)=>{
       const ex=exById(r.exId), d=new Date(r.ts), t=ton(r);
@@ -1208,10 +1767,45 @@ function buildRows(){
       ]);
     });
   });
-  // упражнения без записей — чтобы список тоже восстановился
-  const used=new Set(DB.records.map(r=>r.exId));
-  DB.exercises.filter(e=>!used.has(e.id)).forEach(e=>rows.push(['','','','',e.name,'','','','','','','','','']));
+  // упражнения без записей — чтобы при полной выгрузке восстановился и список
+  if(all){
+    const used=new Set(DB.records.map(r=>r.exId));
+    DB.exercises.filter(e=>!used.has(e.id)).forEach(e=>rows.push(['','','','',e.name,'','','','','','','','','']));
+  }
   return rows;
+}
+function buildProgramRows(progs){
+  const rows=[PROG_HEAD];
+  progs.forEach(p=>{
+    if(!p.folders.length){ rows.push([p.name,'','','','','','','','']); return; }
+    p.folders.forEach(f=>{
+      if(!f.days.length){ rows.push([p.name,f.name,'','','','','','','']); return; }
+      f.days.forEach(d=>{
+        if(!d.items.length){ rows.push([p.name,f.name,d.name,'','','','','','']); return; }
+        d.items.forEach(it=>{
+          const e=exById(it.exId);
+          rows.push([p.name, f.name, d.name, e?e.name:'?', dec(it.reps), dec(it.sets), dec(it.weight),
+            it.time?dec(round(it.time/60,2)):'', it.notes||'']);
+        });
+      });
+    });
+  });
+  return rows;
+}
+function templateRows(){
+  return [PROG_HEAD,
+    ['Моя программа','Неделя 1','Верх','Жим лёжа','10','3','60','',''],
+    ['','','','Тяга штанги в наклоне','10','3','50','',''],
+    ['','','','Жим гантелей сидя','12','3','20','',''],
+    ['','','Низ','Велосипед','','','','10','разминка'],
+    ['','','','Приседания','8','4','80','',''],
+    ['','','','Румынская тяга','10','3','70','',''],
+    ['','Неделя 2','Верх','Жим лёжа','10','3','62,5','','+2,5 кг'],
+    ['','','','Тяга штанги в наклоне','10','3','52,5','',''],
+    ['','','','Жим гантелей сидя','12','3','22','',''],
+    ['','','Низ','Велосипед','','','','10','разминка'],
+    ['','','','Приседания','8','4','85','',''],
+    ['','','','Румынская тяга','10','3','72,5','','']];
 }
 function toDelimited(rows, sep){
   return rows.map(r=>r.map(c=>{
@@ -1221,58 +1815,123 @@ function toDelimited(rows, sep){
     return s;
   }).join(sep)).join('\r\n');
 }
-function exportName(){ return `Тренировки_${dayKey(Date.now())}.csv`; }
+function safeFile(s){ return cleanName(s).replace(/[\\/:*?"<>|]+/g,'_').slice(0,60) || 'программа'; }
 function canShareFiles(){
   try{ return !!(navigator.share && navigator.canShare && navigator.canShare({files:[new File(['x'],'t.csv',{type:'text/csv'})]})); }
   catch(e){ return false; }
 }
 function markExported(){ DB.lastExport=Date.now(); save(); if(curView==='stats') renderStats(); }
 
-function openExport(){
-  if(!DB.records.length && !DB.exercises.length){ toast('Пока нечего выгружать'); return; }
-  const nW=sortedWorkouts().length, nR=DB.records.length;
+let exportCtx={kind:'records'};   // records | programs {ids} | template
+
+function exportRange(){
+  const f=$('#exFrom'), t=$('#exTo');
+  const ws=recWorkouts();
+  if(!f || !t || !ws.length) return {from:null, to:null, full:true};
+  const from=dateInputMs(f.value);
+  let to=dateInputMs(t.value);
+  if(to!=null) to+=DAY-1;
+  const full=(from==null || from<=ws[0].start) && (to==null || to>=ws[ws.length-1].start);
+  return {from, to, full};
+}
+function updateExportCount(){
+  const el=$('#exCount'); if(!el) return;
+  const {from,to}=exportRange();
+  if(from!=null && to!=null && from>to){ el.innerHTML='<span class="bad-text">Дата «С» позже даты «По»</span>'; return; }
+  const ws=recWorkouts().filter(w=>(from==null || w.start>=from) && (to==null || w.start<=to));
+  const ids=new Set(ws.map(w=>w.id));
+  const nR=DB.records.filter(r=>ids.has(r.wId)).length;
+  el.textContent=`В файл попадёт: ${ws.length} ${plural(ws.length,'тренировка','тренировки','тренировок')} · ${nR} ${plural(nR,'запись','записи','записей')}`;
+}
+function exportButtons(){
   const share=canShareFiles();
-  openModal(`<div class="sheet-head"><h2>Выгрузить таблицу</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
-    <p class="muted">${nW} ${plural(nW,'тренировка','тренировки','тренировок')} · ${nR} ${plural(nR,'запись','записи','записей')}.
-    Файл CSV открывается в Excel, Numbers и Google Таблицах: одна строка — одно упражнение, тренировки идут по порядку с номером, датой, днём недели и тоннажем. Этот же файл потом можно загрузить обратно — это и резервная копия.</p>
-    ${share?'<button class="btn big" data-act="export-share">'+I('upload')+'Сохранить в «Файлы» / отправить</button>':''}
+  return `${share?`<button class="btn big" data-act="export-share">${I('upload')}Сохранить в «Файлы» / отправить</button>`:''}
     <button class="btn${share?' ghost':''} big" data-act="export-copy">${I('copy')}Скопировать таблицу</button>
     <button class="btn ghost big" data-act="export-download">${I('download')}Скачать файл</button>
-    <p class="muted" style="margin-top:12px">«Скопировать» — вставка в Numbers / Excel / Google Таблицы сразу разложится по ячейкам.</p>`);
+    <p class="muted" style="margin-top:12px">«Скопировать» — вставка в Numbers / Excel / Google Таблицы сразу разложится по ячейкам.</p>`;
+}
+function openExport(){
+  const ws=recWorkouts();
+  if(!ws.length && !DB.exercises.length){ toast('Пока нечего выгружать'); return; }
+  exportCtx={kind:'records'};
+  const minK=ws.length?dayKey(ws[0].start):'', maxK=ws.length?dayKey(ws[ws.length-1].start):'';
+  const range = ws.length ? `<div class="grid2">
+      <div><label for="exFrom">С</label><input type="date" id="exFrom" value="${minK}" min="${minK}" max="${maxK}"></div>
+      <div><label for="exTo">По</label><input type="date" id="exTo" value="${maxK}" min="${minK}" max="${maxK}"></div>
+    </div>
+    <p class="muted" id="exCount" style="margin:8px 2px 4px"></p>` : '';
+  openModal(`<div class="sheet-head"><h2>Выгрузить записи</h2>${closeX()}</div>
+    <p class="muted">CSV открывается в Excel, Numbers и Google Таблицах: одна строка — одно упражнение. По умолчанию выбран весь период — такой файл служит и резервной копией. Этот же файл можно поправить в Excel (веса, повторы) и загрузить обратно как программу тренировок.</p>
+    ${range}
+    ${exportButtons()}`);
+  updateExportCount();
+}
+function openProgExport(ids, template){
+  exportCtx = template ? {kind:'template'} : {kind:'programs', ids};
+  const progs = template ? [] : ids.map(progById).filter(Boolean);
+  if(!template && !progs.length){ toast('Нет программ для выгрузки'); return; }
+  const title = template ? 'Шаблон программы' : progs.length===1 ? 'Выгрузить программу' : 'Выгрузить программы';
+  const what = template ? 'Пример программы на две недели. Заполните таблицу в Excel / Numbers и загрузите обратно как «Программа тренировок».'
+    : progs.length===1 ? `Программа «${esc(progs[0].name)}».` : `${progs.length} ${plural(progs.length,'программа','программы','программ')}.`;
+  openModal(`<div class="sheet-head"><h2>${title}</h2>${closeX()}</div>
+    <p class="muted">${what} Одна строка — одно упражнение. Колонки: Программа, Папка, Тренировка, Упражнение, Повторения, Подходы, Вес, Время (мин), Заметки. Пустые ячейки в первых трёх колонках берутся из строки выше.</p>
+    ${exportButtons()}`);
+}
+function exportPayload(){
+  const today=dayKey(Date.now());
+  if(exportCtx.kind==='records'){
+    const {from,to,full}=exportRange();
+    if(from!=null && to!=null && from>to){ toast('Дата «С» позже даты «По»'); return null; }
+    const rows = full ? buildRows(null,null) : buildRows(from,to);
+    if(rows.length<2){ toast('За выбранный период нет записей'); return null; }
+    const name = full ? `Тренировки_${today}.csv` : `Тренировки_${$('#exFrom').value||'начало'}_${$('#exTo').value||'конец'}.csv`;
+    return {rows, name, backup:full};
+  }
+  if(exportCtx.kind==='template') return {rows:templateRows(), name:'Шаблон_программы.csv'};
+  const progs=(exportCtx.ids||[]).map(progById).filter(Boolean);
+  if(!progs.length){ toast('Нет программ для выгрузки'); return null; }
+  return {rows:buildProgramRows(progs), name: progs.length===1 ? `Программа_${safeFile(progs[0].name)}.csv` : `Программы_${today}.csv`};
 }
 async function shareExport(){
-  const name=exportName();
-  const file=new File(['\ufeff'+toDelimited(buildRows(),';')], name, {type:'text/csv'});
+  const P=exportPayload(); if(!P) return;
+  const file=new File(['﻿'+toDelimited(P.rows,';')], P.name, {type:'text/csv'});
   try{
-    await navigator.share({files:[file], title:name});
-    markExported(); closeModal(); toast('Готово');
+    await navigator.share({files:[file], title:P.name});
+    if(P.backup) markExported();
+    closeModal(); toast('Готово');
   }catch(e){
     if(e && e.name==='AbortError') return;
     toast('Не получилось — попробуйте «Скопировать таблицу»');
   }
 }
 function downloadExport(){
+  const P=exportPayload(); if(!P) return;
   try{
-    const blob=new Blob(['\ufeff'+toDelimited(buildRows(),';')], {type:'text/csv;charset=utf-8'});
+    const blob=new Blob(['﻿'+toDelimited(P.rows,';')], {type:'text/csv;charset=utf-8'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=url; a.download=exportName(); a.rel='noopener';
+    a.href=url; a.download=P.name; a.rel='noopener';
     document.body.appendChild(a); a.click();
     setTimeout(()=>{ a.remove(); URL.revokeObjectURL(url); }, 5000);
-    markExported();
+    if(P.backup) markExported();
     toast('Если файл не появился — используйте другой способ', null, null, 4000);
   }catch(e){
     toast('Скачивание недоступно — используйте «Скопировать таблицу»');
   }
 }
 async function copyExport(){
-  const text=toDelimited(buildRows(),'\t');
-  if(await copyText(text)){ markExported(); closeModal(); toast('Скопировано — вставьте в таблицу или в Заметки', null, null, null, 'check'); return; }
+  const P=exportPayload(); if(!P) return;
+  const text=toDelimited(P.rows,'\t');
+  if(await copyText(text)){
+    if(P.backup) markExported();
+    closeModal(); toast('Скопировано — вставьте в таблицу или в Заметки', null, null, null, 'check'); return;
+  }
   openModal(`<h2>Скопируйте вручную</h2>
     <textarea readonly style="height:50vh;font-family:ui-monospace,monospace;font-size:12px">${esc(text)}</textarea>
     <p class="muted">Нажмите и удерживайте текст → «Выбрать все» → «Скопировать».</p>
     <button class="btn ghost big" data-act="close-modal">Закрыть</button>`);
 }
+
 async function copyText(t){
   try{
     if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(t); return true; }
@@ -1294,8 +1953,9 @@ let pendingImport=null;
 
 function openImport(){
   openModal(`<div class="sheet-head"><h2>Загрузить таблицу</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
-    <p class="muted">Подходит CSV, выгруженный из этого трекера (и из старой версии), а также своя таблица с колонками
-    <b>Дата</b>, <b>Упражнение</b>, <b>Повторения</b>, <b>Подходы</b>, <b>Вес</b> — остальные колонки по желанию. Порядок колонок не важен.</p>
+    <p class="muted">Подходит CSV, выгруженный из этого трекера (записи или программа), или своя таблица.
+    Для записей нужны колонки <b>Дата</b> и <b>Упражнение</b>, для программы — <b>Упражнение</b> и по желанию <b>Программа</b>, <b>Папка</b>, <b>Тренировка</b>.
+    Дальше <b>Повторения</b>, <b>Подходы</b>, <b>Вес</b>, <b>Время</b>, <b>Заметки</b>. Порядок колонок не важен. После выбора файла приложение спросит, что это — записи или программа.</p>
     <div class="btn big file-btn">${I('folder')}Выбрать файл
       <input type="file" id="importFile" accept=".csv,.tsv,.txt,text/csv,text/plain,text/tab-separated-values">
     </div>
@@ -1478,9 +2138,41 @@ function errHtml(errors){
   if(!errors.length) return '';
   return `<div class="warn-box">Пропущено строк: ${errors.length}<br>${errors.slice(0,5).map(esc).join('<br>')}${errors.length>5?'<br>…':''}</div>`;
 }
+let pendingRows=null, pendingProg=null;
+
+function headerRow(rows){ return rows.findIndex(r=>r.some(c=>normHead(c).startsWith('упражн'))); }
+
+// шаг 1: что это за таблица — записи или программа
 function handleImportText(text){
+  const rows=parseDelimited(text);
+  const hi=headerRow(rows);
+  if(hi<0){ ask('Не найдена строка заголовков. В таблице должна быть колонка «Упражнение».','OK',false,null); return; }
+  const head=rows[hi].map(normHead);
+  const hasDate=head.some(h=>h.startsWith('дата'));
+  const hasProg=head.some(h=>h.startsWith('программ') || h.startsWith('папк'));
+  pendingRows=rows;
+  const progFirst = hasProg || !hasDate;
+  openModal(`<div class="sheet-head"><h2>Что загружаем?</h2>${closeX()}</div>
+    <button class="btn${progFirst?' ghost':''} big" data-act="import-as" data-kind="records"${hasDate?'':' disabled'}>${I('dumbbell')}Мои записи</button>
+    <p class="muted choice-note">${hasDate
+      ? 'Тренировки с датами добавятся в статистику и историю упражнений.'
+      : 'В таблице нет колонки «Дата» — как записи её не загрузить.'}</p>
+    <button class="btn${progFirst?'':' ghost'} big" data-act="import-as" data-kind="program">${I('clip')}Программа тренировок</button>
+    <p class="muted choice-note">${hasProg
+      ? 'Программы, папки и тренировки возьмутся из одноимённых колонок.'
+      : hasDate
+        ? 'Тренировки разложатся по неделям: «Неделя 1», «Неделя 2»… Даты не сохраняются — только упражнения, веса, повторы и подходы.'
+        : 'Тренировки возьмутся из колонки «Тренировка».'}</p>`);
+}
+function importAs(kind){
+  const rows=pendingRows; if(!rows) return;
+  if(kind==='records') previewRecords(rows); else previewProgram(rows);
+}
+
+/* ---- записи ---- */
+function previewRecords(rows){
   let P;
-  try{ P=interpret(parseDelimited(text)); }
+  try{ P=interpret(rows); }
   catch(err){ ask(esc(err.message),'OK',false,null); return; }
   if(!P.recCount && !P.exOnly.size){ ask('В таблице не нашлось ни одной записи.'+errHtml(P.errors),'OK',false,null); return; }
   pendingImport=P;
@@ -1494,7 +2186,7 @@ function handleImportText(text){
   P.groups.forEach(g=>g.recs.forEach(r=>{ if(r.ts<minTs) minTs=r.ts; if(r.ts>maxTs) maxTs=r.ts; }));
   const hasData=DB.records.length>0;
 
-  openModal(`<div class="sheet-head"><h2>Загрузка таблицы</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
+  openModal(`<div class="sheet-head"><h2>Загрузка записей</h2>${closeX()}</div>
     <div class="stats-summary">
       <div class="stats-box"><div class="lbl">Записей</div><div class="val">${P.recCount}</div></div>
       <div class="stats-box"><div class="lbl">Тренировок</div><div class="val">${P.groups.length}</div></div>
@@ -1505,8 +2197,150 @@ function handleImportText(text){
     ${errHtml(P.errors)}
     <button class="btn big" data-act="import-run" data-mode="merge">${I('plus')}${hasData?'Добавить к моим данным':'Загрузить'}</button>
     ${hasData?`<p class="muted" style="margin:8px 2px 0">Записи, которые уже есть в приложении, пропускаются — одну и ту же таблицу можно загружать повторно без дублей.</p>
-    <button class="btn danger big" data-act="import-run" data-mode="replace">${I('swap')}Заменить все данные</button>`:''}
+    <button class="btn danger big" data-act="import-run" data-mode="replace">${I('swap')}Заменить все записи</button>`:''}
     <button class="btn ghost big" data-act="close-modal">Отмена</button>`);
+}
+
+/* ---- программа ---- */
+function progHeadKey(h){
+  if(!h) return null;
+  if(h.startsWith('программ')) return 'prog';
+  if(h.startsWith('папк') || h.startsWith('недел') || h.startsWith('блок') || h.startsWith('этап')) return 'folder';
+  if(h.startsWith('тренировк')) return 'day';
+  if(h.startsWith('время') && /сек|мин/.test(h)) return 'time';
+  if(h.startsWith('дата')) return 'date';
+  if(h.startsWith('упражн')) return 'ex';
+  if(h.startsWith('повтор') || h.startsWith('количеств') || h==='кол-во') return 'reps';
+  if(h.startsWith('подход')) return 'sets';
+  if(h.startsWith('вес')) return 'weight';
+  if(h.startsWith('замет') || h.startsWith('коммент')) return 'notes';
+  return null;
+}
+function parsePrograms(rows){
+  const hi=headerRow(rows);
+  if(hi<0) throw new Error('Не найдена строка заголовков: нужна колонка «Упражнение».');
+  const head=rows[hi].map(normHead);
+  const col={}, unit={};
+  head.forEach((h,i)=>{ const k=progHeadKey(h); if(k && col[k]===undefined){ col[k]=i; unit[k]=/сек/.test(h)?'s':'m'; } });
+  // таблица записей без колонок программы → раскладываем по неделям
+  if(col.prog===undefined && col.folder===undefined && col.date!==undefined) return programFromRecords(rows);
+
+  const errors=[], progs=[];
+  const getP=name=>{ let p=progs.find(x=>normKey(x.name)===normKey(name)); if(!p){ p={name, folders:[]}; progs.push(p); } return p; };
+  const getF=(p,name)=>{ let f=p.folders.find(x=>normKey(x.name)===normKey(name)); if(!f){ f={name, days:[]}; p.folders.push(f); } return f; };
+  const getD=(f,name)=>{ let d=f.days.find(x=>normKey(x.name)===normKey(name)); if(!d){ d={name, items:[]}; f.days.push(d); } return d; };
+  let cur={prog:'', folder:'', day:''};
+
+  for(let i=hi+1;i<rows.length;i++){
+    const r=rows[i];
+    if(!r || r.every(c=>!String(c==null?'':c).trim())) continue;
+    const g=k=> col[k]===undefined ? '' : String(r[col[k]]==null?'':r[col[k]]).trim();
+    const pv=cleanName(g('prog')), fv=cleanName(g('folder')), dv=cleanName(g('day'));
+    // пустые ячейки «Программа / Папка / Тренировка» берутся из строки выше
+    if(pv && normKey(pv)!==normKey(cur.prog)) cur={prog:pv, folder:'', day:''};
+    if(fv && normKey(fv)!==normKey(cur.folder)){ cur.folder=fv; cur.day=''; }
+    if(dv) cur.day=dv;
+    const p=getP(cur.prog);
+    const exName=cleanName(g('ex'));
+    const raw={reps:g('reps'), sets:g('sets'), weight:g('weight'), time:g('time')};
+    if(!exName){
+      if(Object.values(raw).some(Boolean) || g('notes')) errors.push(`Строка ${i+1}: нет названия упражнения`);
+      else if(cur.folder || cur.day){ const f=getF(p, cur.folder||'Неделя 1'); if(cur.day) getD(f, cur.day); }
+      continue;
+    }
+    let bad=null;
+    const val=(k,max)=>{
+      const s=raw[k].replace(/[\s  ]/g,'').replace(',','.');
+      if(!s) return null;
+      const v=Number(s);
+      if(!isFinite(v) || v<0 || v>max){ bad=bad||k; return null; }
+      return v ? round(v,3) : null;
+    };
+    const reps=val('reps',LIMITS.reps), sets=val('sets',LIMITS.sets), weight=val('weight',LIMITS.weight);
+    let time=val('time', unit.time==='s' ? LIMITS.time*60 : LIMITS.time);
+    if(bad){ errors.push(`Строка ${i+1}: неверное значение (${LIMIT_TEXT[bad]})`); continue; }
+    if(time!=null) time=Math.round(unit.time==='s' ? time : time*60);
+    const f=getF(p, cur.folder||'Неделя 1'), d=getD(f, cur.day||'Тренировка 1');
+    d.items.push({exName, reps, sets, weight, time, notes:g('notes')});
+  }
+  return {programs:progs, errors, period:''};
+}
+function programFromRecords(rows){
+  const P=interpret(rows);
+  const weeks=new Map();
+  P.groups.forEach(g=>{
+    const d=new Date(g.start);
+    const mon=new Date(d.getFullYear(), d.getMonth(), d.getDate()-((d.getDay()+6)%7)).getTime();
+    if(!weeks.has(mon)) weeks.set(mon, []);
+    weeks.get(mon).push(g);
+  });
+  const folders=[...weeks.keys()].sort((a,b)=>a-b).map((k,wi)=>({
+    name:`Неделя ${wi+1}`,
+    days:weeks.get(k).map((g,j)=>({name:`Тренировка ${j+1}`,
+      items:g.recs.map(r=>({exName:r.exName, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||''}))}))
+  }));
+  const G=P.groups;
+  return {programs: folders.length ? [{name:'', folders}] : [], errors:P.errors,
+    period: G.length ? `${fmtDate(G[0].start)} — ${fmtDate(G[G.length-1].start)}` : ''};
+}
+function previewProgram(rows){
+  let PP;
+  try{ PP=parsePrograms(rows); }
+  catch(err){ ask(esc(err.message),'OK',false,null); return; }
+  let nF=0, nD=0, nI=0; const names=new Set();
+  PP.programs.forEach(p=>p.folders.forEach(f=>{ nF++; f.days.forEach(d=>{ nD++; d.items.forEach(it=>{ nI++; names.add(normKey(it.exName)); }); }); }));
+  if(!nD){ ask('В таблице не нашлось ни одной тренировки.'+errHtml(PP.errors),'OK',false,null); return; }
+  pendingProg=PP;
+  const have=new Set(DB.exercises.map(e=>normKey(e.name)));
+  const newEx=[...names].filter(n=>!have.has(n)).length;
+  const single=PP.programs.length===1;
+  const defName = single ? (PP.programs[0].name || `Программа ${fmtDate(Date.now())}`) : '';
+  openModal(`<div class="sheet-head"><h2>Загрузка программы</h2>${closeX()}</div>
+    <div class="stats-summary">
+      <div class="stats-box"><div class="lbl">${single?'Папок':'Программ'}</div><div class="val">${single?nF:PP.programs.length}</div></div>
+      <div class="stats-box"><div class="lbl">Тренировок</div><div class="val">${nD}</div></div>
+      <div class="stats-box"><div class="lbl">Упражнений</div><div class="val">${nI}</div></div>
+      <div class="stats-box"><div class="lbl">Новых упр.</div><div class="val">${newEx}</div></div>
+    </div>
+    ${PP.period?`<p class="muted">Из записей за ${PP.period}</p>`:''}
+    ${errHtml(PP.errors)}
+    ${single
+      ? `<label for="ipName">Название программы</label><input id="ipName" value="${esc(defName)}" autocomplete="off" autocapitalize="sentences">`
+      : `<p class="muted">Программы: ${PP.programs.map(p=>'«'+esc(p.name||'Без названия')+'»').join(', ')}</p>`}
+    ${DB.programs.length?`<label class="check"><input type="checkbox" id="ipReplace" checked>Заменить программу с таким же названием</label>`:''}
+    <button class="btn big" data-act="import-prog-run">${I('clip')}${single?'Загрузить программу':'Загрузить программы'}</button>
+    <button class="btn ghost big" data-act="close-modal">Отмена</button>`);
+}
+function runProgramImport(){
+  const PP=pendingProg; if(!PP) return;
+  const single=PP.programs.length===1;
+  let nameOv=null;
+  if(single){
+    nameOv=cleanName($('#ipName').value);
+    if(!nameOv){ markBad($('#ipName'),true); toast('Введите название программы'); return; }
+  }
+  const replace=!!($('#ipReplace') && $('#ipReplace').checked);
+  const res=applyProgramImport(PP, nameOv, replace);
+  pendingProg=null; pendingRows=null;
+  closeModal();
+  if(single && res.lastId!=null) openProgram(res.lastId); else go('prog');
+  toast(res.replaced && !res.created ? 'Программа обновлена' : `Загружено: ${res.created+res.replaced} ${plural(res.created+res.replaced,'программа','программы','программ')}`, null, null, null, 'check');
+}
+function applyProgramImport(PP, nameOv, replace){
+  let created=0, replaced=0, lastId=null;
+  PP.programs.forEach(pp=>{
+    const name = nameOv || pp.name || `Программа ${fmtDate(Date.now())}`;
+    const folders=pp.folders.map(f=>({id:nid('prog'), name:f.name, days:f.days.map(d=>({id:nid('prog'), name:d.name,
+      items:d.items.map(it=>({exId:getOrCreateEx(it.exName).id, reps:it.reps, sets:it.sets, weight:it.weight, time:it.time, notes:it.notes||''}))}))}));
+    const old = replace ? DB.programs.find(p=>normKey(p.name)===normKey(name)) : null;
+    if(old){ old.name=name; old.folders=folders; replaced++; lastId=old.id; }
+    else{
+      const p={id:nid('prog'), name:uniqueName(name, DB.programs.map(x=>x.name)), folders};
+      DB.programs.push(p); created++; lastId=p.id;
+    }
+  });
+  validatePlan(); save();
+  return {created, replaced, lastId};
 }
 
 function resetAll(){
@@ -1518,11 +2352,14 @@ async function runImport(mode){
   const P=pendingImport;
   if(!P) return;
   if(mode==='replace'){
-    const ok=await ask(`Все текущие данные (${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}) будут удалены и заменены таблицей. Если сомневаетесь — сначала сделайте выгрузку.`,'Заменить',true);
+    const ok=await ask(`Все текущие записи (${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}) будут удалены и заменены таблицей. Программы останутся. Если сомневаетесь — сначала сделайте выгрузку.`,'Заменить',true);
     if(!ok) return;
-    const keepExport=DB.lastExport;
+    // программы и упражнения, на которые они ссылаются, сохраняются
+    const keepExport=DB.lastExport, progs=DB.programs, seq=Object.assign({}, DB.seq);
+    const used=new Set(); forEachItem(it=>used.add(it.exId));
+    const keepEx=DB.exercises.filter(e=>used.has(e.id));
     resetAll();
-    DB.lastExport=keepExport;
+    DB.lastExport=keepExport; DB.programs=progs; DB.exercises=keepEx; DB.seq=seq;
   }
   const res=applyImport(P);
   pendingImport=null;
@@ -1567,7 +2404,7 @@ function applyImport(P){
 }
 
 async function clearAll(){
-  if(!await ask('Удалить <b>все</b> тренировки, записи и упражнения? Отменить будет нельзя. Рекомендуем сначала выгрузить таблицу.','Удалить всё',true)) return;
+  if(!await ask('Удалить <b>все</b> тренировки, записи, упражнения и программы? Отменить будет нельзя. Рекомендуем сначала выгрузить записи и программы.','Удалить всё',true)) return;
   resetAll(); save();
   closeModal();
   exInput.value=''; clearForm(true);
@@ -1623,6 +2460,42 @@ document.addEventListener('click', e=>{
     case 'import-text':      importFromTextarea(); break;
     case 'import-run':       runImport(el.dataset.mode); break;
     case 'clear-all':        clearAll(); break;
+    case 'import-as':        importAs(el.dataset.kind); break;
+    case 'import-prog-run':  runProgramImport(); break;
+    // программы
+    case 'name-save':        nameSave(); break;
+    case 'prog-add':         newProgram(); break;
+    case 'prog-open':        openProgram(id); break;
+    case 'prog-back':        curProg=null; go('prog'); break;
+    case 'prog-menu':        openProgMenu(); break;
+    case 'prog-rename':      renameProgram(); break;
+    case 'prog-copy':        copyProgram(); break;
+    case 'prog-del':         deleteProgram(); break;
+    case 'prog-export':      openProgExport([id]); break;
+    case 'prog-export-all':  openProgExport(DB.programs.map(p=>p.id)); break;
+    case 'prog-template':    openProgExport([], true); break;
+    case 'folder-add':       addFolder(); break;
+    case 'folder-menu':      openFolderMenu(id); break;
+    case 'folder-rename':    renameFolder(id); break;
+    case 'folder-dup':       dupFolder(id); break;
+    case 'folder-move':      moveFolder(id, +el.dataset.d); break;
+    case 'folder-del':       deleteFolder(id); break;
+    case 'day-open':         openDay(id); break;
+    case 'day-add':          openDayEdit(null, id); break;
+    case 'day-edit':         openDayEdit(id); break;
+    case 'day-edit-cancel':  dayEditCancel(); break;
+    case 'day-save':         saveDay(); break;
+    case 'day-dup':          dupDay(id); break;
+    case 'day-del':          deleteDay(id); break;
+    case 'di-add':           dayItemAdd(); break;
+    case 'di-move':          dayItemMove(+el.dataset.i, +el.dataset.d); break;
+    case 'di-del':           dayItemDel(+el.dataset.i); break;
+    case 'plan-pick':        openPlanPicker(); break;
+    case 'plan-start':       startPlan(id); break;
+    case 'plan-close':       closePlan(); break;
+    case 'plan-fill':        fillFromPlan(+el.dataset.i); break;
+    case 'w-toprog':         openAddToProg(id); break;
+    case 'ap-save':          saveAddToProg(); break;
   }
 });
 
@@ -1631,6 +2504,14 @@ document.addEventListener('change', e=>{
   if(t.id==='importFile') onImportFile(t);
   else if(t.dataset && t.dataset.filter==='ex'){ tblEx=t.value; renderStats(); }
   else if(t.dataset && t.dataset.filter==='period'){ tblPeriod=t.value; renderStats(); }
+  else if(t.id==='exFrom' || t.id==='exTo') updateExportCount();
+  else if(t.id==='apProg') updateAp(true);
+  else if(t.id==='apFolder') updateAp(false);
+});
+document.addEventListener('input', e=>{
+  const t=e.target;
+  if(t.id==='apName') t.dataset.auto='0';
+  else if(t.id==='exFrom' || t.id==='exTo') updateExportCount();
 });
 
 // Enter в полях модалок = кнопка действия
@@ -1666,6 +2547,7 @@ if('serviceWorker' in navigator && location.protocol==='https:'){
 
 /* ================== СТАРТ ================== */
 fixOrphans();
+fixProgramRefs();
 cleanupWorkouts();
 save();
 renderWorkoutBar();

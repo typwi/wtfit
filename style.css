@@ -350,3 +350,60 @@ body.flash .container{animation:flash 1.2s ease-out}
 /* ---------- поле вне пределов ---------- */
 input.bad,.stepper.bad{border-color:var(--bad)!important;background-color:rgba(255,84,112,.10)}
 .stepper.bad input{background:transparent;border:none!important}
+
+/* ---------- программы ---------- */
+.ic-clip{color:#f06292}
+.ic-up,.ic-down{color:var(--muted)}
+.btn:disabled{opacity:.35;pointer-events:none}
+.bad-text{color:var(--bad)}
+input[type=date]{min-height:48px;display:block;text-align:left}
+.icon-btn.sm{width:30px;height:30px}
+.icon-btn.sm .i{width:16px;height:16px}
+.sheet .list-card{background:var(--card2)}
+.sheet .list-card .list-day{background:var(--card)}
+.sheet .list-card .rec-row:active{background:var(--card)}
+.choice-note{margin:8px 2px 4px;line-height:1.4}
+.check{display:flex;align-items:center;gap:10px;text-transform:none;letter-spacing:0;font-size:15px;font-weight:500;color:var(--txt);margin:14px 2px 4px}
+.check input{width:22px;height:22px;flex:none;-webkit-appearance:checkbox;appearance:auto;padding:0;margin:0;accent-color:var(--accent)}
+
+.folder-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 2px 8px;font-weight:700;font-size:16px}
+.folder-head:first-child{margin-top:4px}
+.folder-head span{display:flex;align-items:center;gap:8px;min-width:0}
+.day-names{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.add-row{color:var(--accent);font-weight:600;font-size:15px;gap:8px}
+.pick-prog{display:flex;align-items:center;gap:8px;font-weight:700;margin:16px 2px 8px}
+.workout-plan{display:flex;align-items:center;font-size:12px;color:#f06292;margin-top:3px;font-weight:600}
+
+/* план на экране «Запись» */
+.plan-open{width:100%;margin-bottom:12px}
+.plan-card{padding:12px 14px}
+.plan-head{display:flex;align-items:center;gap:10px}
+.plan-title-wrap{flex:1;min-width:0}
+.plan-sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plan-title{font-weight:700;font-size:16px}
+.plan-count{font-weight:700;color:var(--ok);font-variant-numeric:tabular-nums}
+.plan-progress{margin:10px 0 4px}
+.plan-progress > div{background:var(--ok)}
+.plan-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--border);cursor:pointer}
+.plan-row:active{opacity:.6}
+.plan-mark{flex:none;width:26px;height:26px;border-radius:50%;background:var(--card2);display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;color:var(--muted)}
+.plan-mark .i{width:15px;height:15px}
+.plan-row.done .plan-mark{background:rgba(55,194,110,.18)}
+.plan-row.done .rec-name{color:var(--muted);text-decoration:line-through}
+.plan-row.next .plan-mark{background:var(--accent);color:#fff}
+.plan-done{display:flex;gap:8px;align-items:center;color:var(--ok);font-weight:600;padding-top:10px;border-top:1px solid var(--border)}
+.sheet .rec-row .plan-mark{background:var(--card)}
+
+/* редактор тренировки программы */
+.pi{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:8px}
+.pi-head{display:flex;gap:4px;align-items:center}
+.pi-num{flex:none;width:20px;text-align:center;color:var(--muted);font-weight:700;font-size:13px}
+.pi-head input{flex:1;min-width:0;background:var(--card);padding:10px 12px}
+.pi-btn{flex:none;width:32px;height:40px;background:none;border:none;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
+.pi-btn:disabled{opacity:.25}
+.pi-btn:active{opacity:.5}
+.pi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
+label.pi-l{margin:0;text-transform:none;letter-spacing:0;font-size:11px;font-weight:600;text-align:center}
+.pi-l input{margin-top:3px;padding:9px 4px;text-align:center;background:var(--card)}
+.pi-notes{background:var(--card);padding:9px 12px}

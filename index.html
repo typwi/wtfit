@@ -44,6 +44,9 @@
   <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></symbol>
   <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1L20.5 8.5"/><path d="M20.5 3.5v5h-5"/></symbol>
   <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M8 3.5v5h7v-5M8 20.5v-6h8v6"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4.5" width="14" height="16.5" rx="2"/><path d="M9 3h6v3H9zM8.5 11h7M8.5 14.5h7M8.5 18h4"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></symbol>
 </svg>
 
 <div class="scroller" id="scroller">
@@ -80,6 +83,8 @@
       </div>
       <div class="progress"><div id="restProgress" style="width:0%"></div></div>
     </div>
+
+    <div id="planBox"></div>
 
     <div class="card form-card">
       <label for="exInput">Упражнение</label>
@@ -151,6 +156,29 @@
   </main>
 </section>
 
+<!-- ============ ЭКРАН ПРОГРАММ ============ -->
+<section id="view-prog" class="view hidden">
+  <header class="topbar">
+    <div class="topbar-title">Программы</div>
+    <button class="icon-btn" data-act="prog-add" aria-label="Новая программа"><svg class="i ic-plus" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+  </header>
+  <main class="container">
+    <div id="progList"></div>
+  </main>
+</section>
+
+<!-- ============ ЭКРАН ПРОГРАММЫ ============ -->
+<section id="view-program" class="view hidden">
+  <header class="topbar">
+    <button class="icon-btn" data-act="prog-back" aria-label="Назад"><svg class="i ic-back" aria-hidden="true"><use href="#i-back"></use></svg></button>
+    <div class="topbar-title" id="progTitle">Программа</div>
+    <button class="icon-btn" data-act="prog-menu" aria-label="Действия"><svg class="i ic-more" aria-hidden="true"><use href="#i-more"></use></svg></button>
+  </header>
+  <main class="container">
+    <div id="progBody"></div>
+  </main>
+</section>
+
 <!-- ============ ЭКРАН УПРАЖНЕНИЙ ============ -->
 <section id="view-ex" class="view hidden">
   <header class="topbar">
@@ -201,6 +229,7 @@
 <!-- ============ НИЖНЕЕ МЕНЮ ============ -->
 <nav class="nav">
   <button data-act="tab" data-tab="record" class="active"><svg class="i ic-pen ico" aria-hidden="true"><use href="#i-pen"></use></svg>Запись</button>
+  <button data-act="tab" data-tab="prog"><svg class="i ic-clip ico" aria-hidden="true"><use href="#i-clip"></use></svg>Программы</button>
   <button data-act="tab" data-tab="ex"><svg class="i ic-dumbbell ico" aria-hidden="true"><use href="#i-dumbbell"></use></svg>Упражнения</button>
   <button data-act="tab" data-tab="stats"><svg class="i ic-chart ico" aria-hidden="true"><use href="#i-chart"></use></svg>Статистика</button>
 </nav>

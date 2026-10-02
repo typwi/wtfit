@@ -1,6 +1,6 @@
 /* Офлайн-кэш: приложение открывается без интернета после первого запуска.
    При каждом изменении файлов увеличивайте VERSION — так обновление гарантированно подтянется. */
-const VERSION = 'v7';
+const VERSION = 'v8';
 const FILES = ['./', './index.html', './style.css', './script.js', './manifest.webmanifest',
                './icon-180.png', './icon-192.png', './icon-512.png'];
 
