@@ -5,6 +5,7 @@
 
 const DB_KEY  = 'fitness_v4';
 const OLD_KEY = 'fitness_v3';
+const HINT_KEY = 'fitness_home_hint_off';
 const DAY = 864e5;
 
 /* Высота приложения. В режиме «с экрана Домой» iOS при прозрачной строке состояния
@@ -221,6 +222,14 @@ function save(){
 }
 function nid(k){ DB.seq[k]=(+DB.seq[k]||0)+1; return DB.seq[k]; }
 
+// просим систему не очищать хранилище автоматически (где поддерживается)
+function askPersist(){
+  try{
+    if(navigator.storage && navigator.storage.persist && navigator.storage.persisted)
+      navigator.storage.persisted().then(p=>p || navigator.storage.persist()).catch(()=>{});
+  }catch(e){}
+}
+
 /* ================== МОДЕЛЬ ================== */
 function exById(id){ return DB.exercises.find(e=>e.id===id); }
 function exByName(name){ const n=normKey(name); return n ? DB.exercises.find(e=>normKey(e.name)===n) : undefined; }
@@ -359,6 +368,24 @@ function closeModal(){
 }
 $('#modal').addEventListener('click', e=>{ if(e.target.id==='modal') closeModal(); });
 
+/* ---- предупреждения: копия и запуск с экрана «Домой» ---- */
+function backupWarnHtml(){
+  if(!DB.records.length || (DB.lastExport && Date.now()-DB.lastExport<=14*DAY)) return '';
+  return `<div class="warn-line" data-act="backup">${I('alert')}<span>${DB.lastExport?'Последняя резервная копия '+fmtDate(DB.lastExport):'Резервной копии ещё нет'} — нажмите, чтобы сохранить полную копию</span></div>`;
+}
+function isIOS(){
+  return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+}
+function homeHintHtml(){
+  if(navigator.standalone!==false || !isIOS()) return '';
+  try{ if(localStorage.getItem(HINT_KEY)) return ''; }catch(e){}
+  return `<div class="warn-line">${I('alert')}<span>Откройте трекер с иконки: Поделиться → «На экран Домой». В обычной вкладке Safari данные хранятся отдельно и могут стереться, если не заходить 7 дней.</span><button class="hint-x" data-act="hint-off" aria-label="Скрыть">${I('x')}</button></div>`;
+}
+function renderNotices(){
+  const box=$('#recNotice');
+  if(box) box.innerHTML=homeHintHtml()+backupWarnHtml();
+}
+
 /* ================== НАВИГАЦИЯ ================== */
 let curView='record';
 function showView(v){
@@ -385,6 +412,7 @@ const exSuggest=$('#exSuggest');
 const NUM_FIELDS=['mReps','mSets','mWeight','mTime'];
 
 function renderRecord(){
+  renderNotices();
   renderWorkoutBar();
   renderPlan();
   renderLastHint();
@@ -650,6 +678,7 @@ let rInterval=null;
 
 function startRest(sec){
   unlockAudio();
+  askNotify();
   if(DB.active.restEnd) cancelRest();
   if(!DB.active.wId) startWorkout(true);
   DB.active.restEnd=Date.now()+sec*1000;
@@ -729,7 +758,7 @@ function customRestStart(){
   startRest(total);
 }
 
-/* ---- звук / вибрация / экран ---- */
+/* ---- звук / вибрация / уведомления / экран ---- */
 let AC=null;
 function unlockAudio(){
   try{
@@ -757,12 +786,32 @@ function beep(){
     });
   }catch(e){}
 }
+// разрешение на уведомления спрашиваем один раз — при первом запуске таймера отдыха
+// (на iPhone работает только в приложении с экрана «Домой», iOS 16.4+)
+let notifyAsked=false;
+function askNotify(){
+  if(notifyAsked) return;
+  notifyAsked=true;
+  try{
+    if(!window.Notification || Notification.permission!=='default') return;
+    const p=Notification.requestPermission();
+    if(p && p.catch) p.catch(()=>{});
+  }catch(e){}
+}
+function showNote(title, body){
+  const opts={body, icon:'icon-192.png', tag:'rest'};
+  try{
+    // на iPhone уведомления показываются только через Service Worker
+    if(swReg && swReg.showNotification){ swReg.showNotification(title, opts).catch(()=>{}); return; }
+    new Notification(title, opts);
+  }catch(e){}
+}
 function signalRestEnd(){
   beep();
   try{ navigator.vibrate && navigator.vibrate([200,100,200]); }catch(e){}
   try{
     if(document.hidden && window.Notification && Notification.permission==='granted')
-      new Notification('Отдых окончен',{body:'Пора к следующему подходу'});
+      showNote('Отдых окончен','Пора к следующему подходу');
   }catch(e){}
   toast('Отдых окончен — к следующему подходу', null, null, 5000, 'bell');
   document.body.classList.remove('flash'); void document.body.offsetWidth; document.body.classList.add('flash');
@@ -1137,8 +1186,7 @@ let statsMode='cards', tblEx='all', tblPeriod='all';
 function renderStats(){
   const top=$('#statsTop'), body=$('#statsBody'), warn=$('#statsWarn');
   $$('#statsSeg button').forEach(b=>b.classList.toggle('active', b.dataset.mode===statsMode));
-  warn.innerHTML = (DB.records.length && (!DB.lastExport || Date.now()-DB.lastExport>14*DAY))
-    ? `<div class="warn-line" data-act="backup">${I('alert')}<span>${DB.lastExport?'Последняя резервная копия '+fmtDate(DB.lastExport):'Резервной копии ещё нет'} — нажмите, чтобы сохранить полную копию</span></div>` : '';
+  warn.innerHTML=backupWarnHtml();
 
   const ws=sortedWorkouts();
   if(!ws.length){
@@ -1296,7 +1344,7 @@ let curProg=null;
 function renderProgList(){
   const box=$('#progList');
   const tools=`<div class="data-row">
-      <button class="btn ghost sm" data-act="import">${I('download')}Загрузить</button>
+      <button class="btn ghost sm" data-act="import" data-kind="program">${I('download')}Загрузить</button>
       ${DB.programs.length
         ? `<button class="btn ghost sm" data-act="prog-export-all">${I('upload')}Выгрузить все</button>`
         : `<button class="btn ghost sm" data-act="prog-template">${I('copy')}Шаблон для Excel</button>`}
@@ -1754,34 +1802,40 @@ function saveAddToProg(){
   toast(`Добавлено: «${p.name}» → «${f.name}»`, 'Открыть', ()=>openProgram(pid), 4500, 'check');
 }
 
-/* ================== ДАННЫЕ: ВЫГРУЗКА ================== */
+/* ================== ДАННЫЕ ================== */
 function openDataSheet(){
   const nW=sortedWorkouts().length;
   openModal(`<div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
     <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.<br>
-    ${DB.lastExport?'Последняя выгрузка: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Выгрузок ещё не было.'}</p>
+    ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}</p>
+    <p class="muted" id="persistInfo"></p>
     <button class="btn big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
+    <button class="btn ghost big" data-act="import" data-kind="backup">${I('swap')}Восстановить из копии</button>
     <button class="btn ghost big" data-act="export">${I('upload')}Выгрузить записи (таблица)</button>
-    <button class="btn ghost big" data-act="import">${I('download')}Загрузить</button>
     <button class="btn danger big" data-act="clear-all">${I('trash')}Удалить все данные</button>`);
+  try{
+    if(navigator.storage && navigator.storage.persisted)
+      navigator.storage.persisted().then(p=>{
+        const el=$('#persistInfo');
+        if(el) el.textContent = p ? 'Хранилище защищено от автоматической очистки.'
+                                  : 'Система может очистить хранилище при нехватке места — регулярно делайте полную копию.';
+      }).catch(()=>{});
+  }catch(e){}
 }
 
+/* ---- выгрузка ---- */
 function dec(v){ return v==null||v==='' ? '' : String(v).replace('.',','); }
 const EXPORT_HEAD=['Дата','День','Время','Тренировка','Упражнение','Повторения','Подходы','Вес, кг','Тоннаж, кг','Время, мин','Заметки','Начало тренировки','Длительность, мин','Отдых, мин'];
 const PROG_HEAD=['Программа','Папка','Тренировка','Упражнение','Повторения','Подходы','Вес, кг','Время, мин','Заметки'];
 
 function recWorkouts(){ return DB.workouts.filter(w=>DB.records.some(r=>r.wId===w.id)).sort((a,b)=>a.start-b.start); }
-function dateInputMs(v){ const m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(+m[1],+m[2]-1,+m[3]).getTime() : null; }
 
-// from/to — границы по началу тренировки (мс) или null; номер тренировки сквозной по всем записям
-function buildRows(from, to){
+// все записи; номер тренировки — сквозной
+function buildRows(){
   const rows=[EXPORT_HEAD];
-  const all = from==null && to==null;
   let n=0;
   recWorkouts().forEach(w=>{
     n++;
-    if(from!=null && w.start<from) return;
-    if(to!=null && w.start>to) return;
     const recs=recsOfW(w.id);
     const dur=isActive(w) ? 0 : wDur(w);
     recs.forEach((r,j)=>{
@@ -1795,11 +1849,9 @@ function buildRows(from, to){
       ]);
     });
   });
-  // упражнения без записей — чтобы при полной выгрузке восстановился и список
-  if(all){
-    const used=new Set(DB.records.map(r=>r.exId));
-    DB.exercises.filter(e=>!used.has(e.id)).forEach(e=>rows.push(['','','','',e.name,'','','','','','','','','']));
-  }
+  // упражнения без записей — чтобы при загрузке восстановился и список
+  const used=new Set(DB.records.map(r=>r.exId));
+  DB.exercises.filter(e=>!used.has(e.id)).forEach(e=>rows.push(['','','','',e.name,'','','','','','','','','']));
   return rows;
 }
 function buildProgramRows(progs){
@@ -1848,29 +1900,10 @@ function canShareFiles(){
   try{ return !!(navigator.share && navigator.canShare && navigator.canShare({files:[new File(['x'],'t.csv',{type:'text/csv'})]})); }
   catch(e){ return false; }
 }
-function markExported(){ DB.lastExport=Date.now(); save(); if(curView==='stats') renderStats(); }
+function markExported(){ DB.lastExport=Date.now(); save(); refresh(); }
 
-let exportCtx={kind:'records'};   // records | programs {ids} | template
+let exportCtx={kind:'records'};   // records | programs {ids} | template | backup
 
-function exportRange(){
-  const f=$('#exFrom'), t=$('#exTo');
-  const ws=recWorkouts();
-  if(!f || !t || !ws.length) return {from:null, to:null, full:true};
-  const from=dateInputMs(f.value);
-  let to=dateInputMs(t.value);
-  if(to!=null) to+=DAY-1;
-  const full=(from==null || from<=ws[0].start) && (to==null || to>=ws[ws.length-1].start);
-  return {from, to, full};
-}
-function updateExportCount(){
-  const el=$('#exCount'); if(!el) return;
-  const {from,to}=exportRange();
-  if(from!=null && to!=null && from>to){ el.innerHTML='<span class="bad-text">Дата «С» позже даты «По»</span>'; return; }
-  const ws=recWorkouts().filter(w=>(from==null || w.start>=from) && (to==null || w.start<=to));
-  const ids=new Set(ws.map(w=>w.id));
-  const nR=DB.records.filter(r=>ids.has(r.wId)).length;
-  el.textContent=`В файл попадёт: ${ws.length} ${plural(ws.length,'тренировка','тренировки','тренировок')} · ${nR} ${plural(nR,'запись','записи','записей')}`;
-}
 function exportButtons(){
   const share=canShareFiles();
   return `${share?`<button class="btn big" data-act="export-share">${I('upload')}Сохранить в «Файлы» / отправить</button>`:''}
@@ -1882,24 +1915,17 @@ function openExport(){
   const ws=recWorkouts();
   if(!ws.length && !DB.exercises.length){ toast('Пока нечего выгружать'); return; }
   exportCtx={kind:'records'};
-  const minK=ws.length?dayKey(ws[0].start):'', maxK=ws.length?dayKey(ws[ws.length-1].start):'';
-  const range = ws.length ? `<div class="grid2">
-      <div><label for="exFrom">С</label><input type="date" id="exFrom" value="${minK}" min="${minK}" max="${maxK}"></div>
-      <div><label for="exTo">По</label><input type="date" id="exTo" value="${maxK}" min="${minK}" max="${maxK}"></div>
-    </div>
-    <p class="muted" id="exCount" style="margin:8px 2px 4px"></p>` : '';
   openModal(`<div class="sheet-head"><h2>Выгрузить записи</h2>${closeX()}</div>
-    <p class="muted">CSV открывается в Excel, Numbers и Google Таблицах: одна строка — одно упражнение. По умолчанию выбран весь период — такой файл служит и резервной копией. Этот же файл можно поправить в Excel (веса, повторы) и загрузить обратно как программу тренировок.</p>
-    ${range}
+    <p class="muted">Все записи: ${ws.length} ${plural(ws.length,'тренировка','тренировки','тренировок')} · ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}.
+    CSV открывается в Excel, Numbers и Google Таблицах: одна строка — одно упражнение. Этот же файл можно поправить в Excel (веса, повторы) и загрузить на вкладке «Программы» как программу тренировок.</p>
     ${exportButtons()}`);
-  updateExportCount();
 }
 function openProgExport(ids, template){
   exportCtx = template ? {kind:'template'} : {kind:'programs', ids};
   const progs = template ? [] : ids.map(progById).filter(Boolean);
   if(!template && !progs.length){ toast('Нет программ для выгрузки'); return; }
   const title = template ? 'Шаблон программы' : progs.length===1 ? 'Выгрузить программу' : 'Выгрузить программы';
-  const what = template ? 'Пример программы на две недели. Заполните таблицу в Excel / Numbers и загрузите обратно как «Программа тренировок».'
+  const what = template ? 'Пример программы на две недели. Заполните таблицу в Excel / Numbers, сохраните как CSV и загрузите на вкладке «Программы» → «Загрузить».'
     : progs.length===1 ? `Программа «${esc(progs[0].name)}».` : `${progs.length} ${plural(progs.length,'программа','программы','программ')}.`;
   openModal(`<div class="sheet-head"><h2>${title}</h2>${closeX()}</div>
     <p class="muted">${what} Одна строка — одно упражнение. Колонки: Программа, Папка, Тренировка, Упражнение, Повторения, Подходы, Вес, Время (мин), Заметки. Пустые ячейки в первых трёх колонках берутся из строки выше.</p>
@@ -1908,12 +1934,9 @@ function openProgExport(ids, template){
 function exportPayload(){
   const today=dayKey(Date.now());
   if(exportCtx.kind==='records'){
-    const {from,to,full}=exportRange();
-    if(from!=null && to!=null && from>to){ toast('Дата «С» позже даты «По»'); return null; }
-    const rows = full ? buildRows(null,null) : buildRows(from,to);
-    if(rows.length<2){ toast('За выбранный период нет записей'); return null; }
-    const name = full ? `Тренировки_${today}.csv` : `Тренировки_${$('#exFrom').value||'начало'}_${$('#exTo').value||'конец'}.csv`;
-    return csvPayload(rows, name);
+    const rows=buildRows();
+    if(rows.length<2){ toast('Пока нечего выгружать'); return null; }
+    return csvPayload(rows, `Тренировки_${today}.csv`);
   }
   if(exportCtx.kind==='backup'){
     const text=JSON.stringify(backupData());
@@ -1940,7 +1963,7 @@ function openBackup(){
   openModal(`<div class="sheet-head"><h2>Полная копия</h2>${closeX()}</div>
     <p class="muted">Один файл со всем сразу: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')},
     ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.
-    Сохраните его в «Файлы» (лучше в iCloud Drive). Восстановить: «Загрузить» → выбрать этот файл.</p>
+    Сохраните его в «Файлы» (лучше в iCloud Drive). Восстановить: Статистика → ⋯ → «Восстановить из копии».</p>
     ${exportButtons().replace('Скопировать таблицу','Скопировать текст копии').replace(/<p class="muted" style="margin-top:12px">.*?<\/p>/s,'')}`);
 }
 async function shareExport(){
@@ -1952,7 +1975,7 @@ async function shareExport(){
     closeModal(); toast('Готово');
   }catch(e){
     if(e && e.name==='AbortError') return;
-    toast('Не получилось — попробуйте «Скопировать таблицу»');
+    toast('Не получилось — попробуйте «Скопировать»');
   }
 }
 function downloadExport(){
@@ -1967,7 +1990,7 @@ function downloadExport(){
     if(P.backup) markExported();
     toast('Если файл не появился — используйте другой способ', null, null, 4000);
   }catch(e){
-    toast('Скачивание недоступно — используйте «Скопировать таблицу»');
+    toast('Скачивание недоступно — используйте «Скопировать»');
   }
 }
 async function copyExport(){
@@ -1999,20 +2022,19 @@ async function copyText(t){
   }catch(e){ return false; }
 }
 
-/* ================== ДАННЫЕ: ЗАГРУЗКА ================== */
-let pendingImport=null;
+/* ================== ЗАГРУЗКА ==================
+   «Загрузить» в Статистике   → записи (kind=records)
+   «Загрузить» в Программах   → программа (kind=program)
+   «Восстановить из копии»    → полная копия .json (kind=backup)
+   Файл полной копии (.json) распознаётся в любом из трёх мест. */
+let pendingImport=null, pendingProg=null, pendingBackup=null;
+let importKind='records';
 
-function openImport(){
-  openModal(`<div class="sheet-head"><h2>Загрузить таблицу</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
-    <p class="muted">Подходит файл полной копии (.json), CSV, выгруженный из этого трекера (записи или программа), или своя таблица.
-    Для записей нужны колонки <b>Дата</b> и <b>Упражнение</b>, для программы — <b>Упражнение</b> и по желанию <b>Программа</b>, <b>Папка</b>, <b>Тренировка</b>.
-    Дальше <b>Повторения</b>, <b>Подходы</b>, <b>Вес</b>, <b>Время</b>, <b>Заметки</b>. Порядок колонок не важен. После выбора файла приложение спросит, что это — записи или программа.</p>
-    <div class="btn big file-btn">${I('folder')}Выбрать файл
-      <input type="file" id="importFile" accept=".csv,.tsv,.txt,.json,text/csv,text/plain,text/tab-separated-values,application/json">
-    </div>
-    <label for="importText">или вставьте ячейки таблицы</label>
-    <textarea id="importText" placeholder="Скопируйте строки в Numbers / Excel вместе со строкой заголовков и вставьте сюда"></textarea>
-    <button class="btn ghost big" data-act="import-text">Загрузить из текста</button>`);
+function openImport(kind){
+  importKind=kind||'records';
+  const inp=$('#importFile'); if(!inp) return;
+  inp.value='';
+  inp.click();
 }
 async function onImportFile(inp){
   const f=inp.files && inp.files[0];
@@ -2020,7 +2042,7 @@ async function onImportFile(inp){
   try{
     const text=await readFileText(f);
     inp.value='';
-    handleImportText(text);
+    handleImportText(text, importKind);
   }catch(err){
     inp.value='';
     ask(esc(err && err.message || 'Не удалось прочитать файл'),'OK',false,null);
@@ -2032,7 +2054,7 @@ async function readFileText(f){
   else buf=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsArrayBuffer(f); });
   const b=new Uint8Array(buf);
   if((b[0]===0x50&&b[1]===0x4B) || (b[0]===0xD0&&b[1]===0xCF))
-    throw new Error('Это файл Excel / Numbers, а не CSV. Экспортируйте таблицу в CSV (Файл → Экспорт → CSV) или скопируйте ячейки и вставьте текстом.');
+    throw new Error('Это файл Excel / Numbers, а не CSV. Экспортируйте таблицу в CSV (Файл → Экспорт → CSV) и загрузите его.');
   if(b[0]===0xFF&&b[1]===0xFE) return new TextDecoder('utf-16le').decode(b);
   if(b[0]===0xFE&&b[1]===0xFF) return new TextDecoder('utf-16be').decode(b);
   try{ return new TextDecoder('utf-8',{fatal:true}).decode(b); }
@@ -2046,11 +2068,6 @@ async function readFileText(f){
     });
     return best!=null ? best : new TextDecoder('utf-8').decode(b);
   }
-}
-function importFromTextarea(){
-  const t=$('#importText') ? $('#importText').value : '';
-  if(!t.trim()){ toast('Вставьте текст таблицы'); return; }
-  handleImportText(t);
 }
 
 // CSV/TSV → массив строк (разделитель определяется автоматически)
@@ -2195,7 +2212,6 @@ function errHtml(errors){
   if(!errors.length) return '';
   return `<div class="warn-box">Пропущено строк: ${errors.length}<br>${errors.slice(0,5).map(esc).join('<br>')}${errors.length>5?'<br>…':''}</div>`;
 }
-let pendingRows=null, pendingProg=null, pendingBackup=null;
 
 function previewBackup(text){
   let B;
@@ -2235,8 +2251,7 @@ async function restoreBackup(){
 
 function headerRow(rows){ return rows.findIndex(r=>r.some(c=>normHead(c).startsWith('упражн'))); }
 
-// шаг 1: что это за таблица — записи или программа
-const ENCODING_HELP='Похоже, файл сохранён не в UTF-8 и русские буквы испортились. В Excel сохраните таблицу как <b>«CSV UTF-8 (разделители — запятые)»</b>, в Numbers — Файл → Экспорт → CSV (кодировка Unicode UTF-8). Или просто скопируйте ячейки и вставьте текстом.';
+const ENCODING_HELP='Похоже, файл сохранён не в UTF-8 и русские буквы испортились. В Excel сохраните таблицу как <b>«CSV UTF-8 (разделители — запятые)»</b>, в Numbers — Файл → Экспорт → CSV (кодировка Unicode UTF-8).';
 function looksBroken(text){
   const s=String(text).slice(0,4000);
   if(/\ufffd/.test(s)) return true;                                  // «�» — байты не распознаны
@@ -2244,35 +2259,27 @@ function looksBroken(text){
   const letters=(s.match(/[A-Za-zА-Яа-яЁё]/g)||[]).length;
   return letters<10 && (s.match(/\?{2,}/g)||[]).length>2;          // кириллица заменена на «???»
 }
-function handleImportText(text){
+function handleImportText(text, kind){
   const trimmed=String(text).replace(/^\ufeff/,'').trim();
   if(trimmed.startsWith('{')){ previewBackup(trimmed); return; }
+  if(kind==='backup'){
+    ask('Это не файл полной копии. Выберите файл вида <b>Полная_копия_….json</b>. Таблицы загружаются кнопкой «Загрузить» в Статистике (записи) или в Программах.','OK',false,null);
+    return;
+  }
   const rows=parseDelimited(text);
   const hi=headerRow(rows);
   if(hi<0){
     ask(looksBroken(text) ? ENCODING_HELP : 'Не найдена строка заголовков. В таблице должна быть колонка «Упражнение».','OK',false,null);
     return;
   }
+  if(kind==='program'){ previewProgram(rows); return; }
   const head=rows[hi].map(normHead);
-  const hasDate=head.some(h=>h.startsWith('дата'));
-  const hasProg=head.some(h=>h.startsWith('программ') || h.startsWith('папк'));
-  pendingRows=rows;
-  const progFirst = hasProg || !hasDate;
-  openModal(`<div class="sheet-head"><h2>Что загружаем?</h2>${closeX()}</div>
-    <button class="btn${progFirst?' ghost':''} big" data-act="import-as" data-kind="records"${hasDate?'':' disabled'}>${I('dumbbell')}Мои записи</button>
-    <p class="muted choice-note">${hasDate
-      ? 'Тренировки с датами добавятся в статистику и историю упражнений.'
-      : 'В таблице нет колонки «Дата» — как записи её не загрузить.'}</p>
-    <button class="btn${progFirst?'':' ghost'} big" data-act="import-as" data-kind="program">${I('clip')}Программа тренировок</button>
-    <p class="muted choice-note">${hasProg
-      ? 'Программы, папки и тренировки возьмутся из одноимённых колонок.'
-      : hasDate
-        ? 'Тренировки разложатся по неделям: «Неделя 1», «Неделя 2»… Даты не сохраняются — только упражнения, веса, повторы и подходы.'
-        : 'Тренировки возьмутся из колонки «Тренировка».'}</p>`);
-}
-function importAs(kind){
-  const rows=pendingRows; if(!rows) return;
-  if(kind==='records') previewRecords(rows); else previewProgram(rows);
+  if(!head.some(h=>h.startsWith('дата'))){
+    const isProg=head.some(h=>h.startsWith('программ') || h.startsWith('папк'));
+    ask(`В таблице нет колонки «Дата» — как записи тренировок её не загрузить.${isProg?' Похоже, это программа — загрузите её на вкладке «Программы».':''}`,'OK',false,null);
+    return;
+  }
+  previewRecords(rows);
 }
 
 /* ---- записи ---- */
@@ -2356,7 +2363,7 @@ function parsePrograms(rows){
     }
     let bad=null;
     const val=(k,max)=>{
-      const s=raw[k].replace(/[\s  ]/g,'').replace(',','.');
+      const s=raw[k].replace(/[\s  ]/g,'').replace(',','.');
       if(!s) return null;
       const v=Number(s);
       if(!isFinite(v) || v<0 || v>max){ bad=bad||k; return null; }
@@ -2408,7 +2415,7 @@ function previewProgram(rows){
       <div class="stats-box"><div class="lbl">Упражнений</div><div class="val">${nI}</div></div>
       <div class="stats-box"><div class="lbl">Новых упр.</div><div class="val">${newEx}</div></div>
     </div>
-    ${PP.period?`<p class="muted">Из записей за ${PP.period}</p>`:''}
+    ${PP.period?`<p class="muted">Из записей за ${PP.period}. Тренировки разложены по неделям, даты не сохраняются.</p>`:''}
     ${errHtml(PP.errors)}
     ${single
       ? `<label for="ipName">Название программы</label><input id="ipName" value="${esc(defName)}" autocomplete="off" autocapitalize="sentences">`
@@ -2427,7 +2434,7 @@ function runProgramImport(){
   }
   const replace=!!($('#ipReplace') && $('#ipReplace').checked);
   const res=applyProgramImport(PP, nameOv, replace);
-  pendingProg=null; pendingRows=null;
+  pendingProg=null;
   closeModal();
   if(single && res.lastId!=null) openProgram(res.lastId); else go('prog');
   toast(res.replaced && !res.created ? 'Программа обновлена' : `Загружено: ${res.created+res.replaced} ${plural(res.created+res.replaced,'программа','программы','программ')}`, null, null, null, 'check');
@@ -2458,7 +2465,7 @@ async function runImport(mode){
   const P=pendingImport;
   if(!P) return;
   if(mode==='replace'){
-    const ok=await ask(`Все текущие записи (${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}) будут удалены и заменены таблицей. Программы останутся. Если сомневаетесь — сначала сделайте выгрузку.`,'Заменить',true);
+    const ok=await ask(`Все текущие записи (${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}) будут удалены и заменены таблицей. Программы останутся. Если сомневаетесь — сначала сделайте полную копию.`,'Заменить',true);
     if(!ok) return;
     // программы и упражнения, на которые они ссылаются, сохраняются
     const keepExport=DB.lastExport, progs=DB.programs, seq=Object.assign({}, DB.seq);
@@ -2510,7 +2517,7 @@ function applyImport(P){
 }
 
 async function clearAll(){
-  if(!await ask('Удалить <b>все</b> тренировки, записи, упражнения и программы? Отменить будет нельзя. Рекомендуем сначала выгрузить записи и программы.','Удалить всё',true)) return;
+  if(!await ask('Удалить <b>все</b> тренировки, записи, упражнения и программы? Отменить будет нельзя. Рекомендуем сначала сделать полную копию.','Удалить всё',true)) return;
   resetAll(); save();
   closeModal();
   exInput.value=''; clearForm(true);
@@ -2562,14 +2569,13 @@ document.addEventListener('click', e=>{
     case 'export-share':     shareExport(); break;
     case 'export-download':  downloadExport(); break;
     case 'export-copy':      copyExport(); break;
-    case 'import':           openImport(); break;
-    case 'import-text':      importFromTextarea(); break;
+    case 'import':           openImport(el.dataset.kind); break;
     case 'import-run':       runImport(el.dataset.mode); break;
     case 'clear-all':        clearAll(); break;
-    case 'import-as':        importAs(el.dataset.kind); break;
     case 'backup':           openBackup(); break;
     case 'backup-restore':   restoreBackup(); break;
     case 'import-prog-run':  runProgramImport(); break;
+    case 'hint-off':         try{ localStorage.setItem(HINT_KEY,'1'); }catch(_){} renderNotices(); break;
     // программы
     case 'name-save':        nameSave(); break;
     case 'prog-add':         newProgram(); break;
@@ -2612,14 +2618,12 @@ document.addEventListener('change', e=>{
   if(t.id==='importFile') onImportFile(t);
   else if(t.dataset && t.dataset.filter==='ex'){ tblEx=t.value; renderStats(); }
   else if(t.dataset && t.dataset.filter==='period'){ tblPeriod=t.value; renderStats(); }
-  else if(t.id==='exFrom' || t.id==='exTo') updateExportCount();
   else if(t.id==='apProg') updateAp(true);
   else if(t.id==='apFolder') updateAp(false);
 });
 document.addEventListener('input', e=>{
   const t=e.target;
   if(t.id==='apName') t.dataset.auto='0';
-  else if(t.id==='exFrom' || t.id==='exTo') updateExportCount();
 });
 
 // Enter в полях модалок = кнопка действия
@@ -2639,6 +2643,7 @@ document.addEventListener('visibilitychange', ()=>{
   if(DB.active.restEnd){ tickRest(); requestWake(); }
   if(!$('#modal').classList.contains('show')) refresh();
   checkForgotten();
+  if(swReg) swReg.update().catch(()=>{});   // проверить, не вышла ли новая версия
 });
 
 // изменения из другой вкладки/окна
@@ -2649,12 +2654,25 @@ window.addEventListener('storage', e=>{
 
 window.onerror=function(msg, src, line){ console.error('Ошибка:', msg, 'строка', line); return false; };
 
-/* ================== ОФЛАЙН (для «На экран Домой» в Safari) ================== */
+/* ================== ОФЛАЙН И ОБНОВЛЕНИЯ ==================
+   Service Worker отдаёт все файлы одним набором. Когда на GitHub выходит новая версия
+   (в sw.js увеличен VERSION), она скачивается целиком в фоне, и приложение предлагает перезапуститься. */
+let swReg=null;
 if('serviceWorker' in navigator && location.protocol==='https:'){
-  navigator.serviceWorker.register('sw.js').catch(()=>{});
+  const hadSW=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js', {updateViaCache:'none'})
+    .then(r=>{ swReg=r; })
+    .catch(()=>{});
+  let reloadOffered=false;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if(!hadSW || reloadOffered) return;      // первая установка — перезапуск не нужен
+    reloadOffered=true;
+    toast('Вышла новая версия приложения', 'Обновить', ()=>location.reload(), 10000, 'swap');
+  });
 }
 
 /* ================== СТАРТ ================== */
+askPersist();
 fixOrphans();
 fixProgramRefs();
 cleanupWorkouts();

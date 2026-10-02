@@ -59,6 +59,8 @@
   </header>
 
   <main class="container">
+    <div id="recNotice"></div>
+
     <div class="timer-bar hidden" id="timerBar">
       <div class="timer-row">
         <div class="timer-display">
@@ -212,7 +214,7 @@
   <main class="container">
     <div class="data-row">
       <button class="btn ghost sm" data-act="export"><svg class="i ic-upload" aria-hidden="true"><use href="#i-upload"></use></svg>Выгрузить</button>
-      <button class="btn ghost sm" data-act="import"><svg class="i ic-download" aria-hidden="true"><use href="#i-download"></use></svg>Загрузить</button>
+      <button class="btn ghost sm" data-act="import" data-kind="records"><svg class="i ic-download" aria-hidden="true"><use href="#i-download"></use></svg>Загрузить</button>
     </div>
     <div id="statsWarn"></div>
     <div id="statsTop"></div>
@@ -240,6 +242,10 @@
 
 <div class="dialog" id="dialog"></div>
 <div class="toast" id="toast"></div>
+
+<!-- выбор файла для загрузки (открывается кнопками «Загрузить» / «Восстановить из копии») -->
+<input type="file" id="importFile" class="file-hidden" tabindex="-1" aria-hidden="true"
+       accept=".csv,.tsv,.txt,.json,text/csv,text/plain,text/tab-separated-values,application/json">
 
 <script src="script.js"></script>
 </body>

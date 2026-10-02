@@ -1,12 +1,32 @@
-/* Офлайн-кэш: приложение открывается без интернета после первого запуска.
-   При каждом изменении файлов увеличивайте VERSION — так обновление гарантированно подтянется. */
-const VERSION = 'v9';
-const FILES = ['./', './index.html', './style.css', './script.js', './manifest.webmanifest',
-               './icon-180.png', './icon-192.png', './icon-512.png'];
-const WAIT_MS = 2500;   // сколько ждём сеть, прежде чем открыть копию из кэша
+/* Офлайн-кэш. Все файлы приложения хранятся ОДНИМ набором под именем VERSION и всегда
+   отдаются из него — HTML, CSS и JS гарантированно из одной версии, даже при плохой связи.
+   ВАЖНО: после любой правки файлов увеличьте VERSION — иначе телефон продолжит открывать старый набор.
+   Новый набор скачивается целиком (в обход HTTP-кэша GitHub Pages); если хоть один основной файл
+   не скачался — обновление отменяется и остаётся старая рабочая версия. */
+const VERSION = 'v10';
+const CORE  = ['./', './index.html', './style.css', './script.js', './manifest.webmanifest'];
+const EXTRA = ['./icon-180.png', './icon-192.png', './icon-512.png'];   // иконки — по возможности
+
+const fresh = url => fetch(new Request(url, { cache: 'no-cache' }));
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    try {
+      // сначала скачиваем всё, и только потом кладём в кэш — набор либо полный, либо никакой
+      const got = await Promise.all(CORE.map(async u => {
+        const r = await fresh(u);
+        if (!r.ok) throw new Error(u + ' → ' + r.status);
+        return [u, r];
+      }));
+      const c = await caches.open(VERSION);
+      await Promise.all(got.map(([u, r]) => c.put(u, r)));
+      await Promise.all(EXTRA.map(u => fresh(u).then(r => r.ok ? c.put(u, r) : null).catch(() => {})));
+    } catch (err) {
+      await caches.delete(VERSION);
+      throw err;                       // установка не удалась — продолжает работать прежняя версия
+    }
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', e => {
@@ -17,37 +37,32 @@ self.addEventListener('activate', e => {
   );
 });
 
-const fromCache = req => caches.match(req, { ignoreSearch: true })
-  .then(r => r || (req.mode === 'navigate' ? caches.match('./index.html') : undefined));
-
-// Сначала сеть, чтобы правки сразу подхватывались. Но если сеть не ответила за WAIT_MS
-// (плохая связь в зале), нет сети или сайт ответил ошибкой (404, 5xx) — открываем копию из кэша.
-// Свежий ответ, пришедший позже, всё равно сохраняется в кэш — он будет при следующем запуске.
+// Файлы приложения — только из текущего набора; всё прочее — из сети без HTTP-кэша.
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  const same = new URL(e.request.url).origin === location.origin;
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== location.origin) return;
 
-  const network = fetch(e.request).then(res => {
-    if (res.ok && same) {
-      const copy = res.clone();
-      e.waitUntil(caches.open(VERSION).then(c => c.put(e.request, copy)));
+  e.respondWith((async () => {
+    const c = await caches.open(VERSION);
+    let hit = await c.match(req, { ignoreSearch: true });
+    if (!hit && req.mode === 'navigate') hit = await c.match('./index.html');
+    if (hit) return hit;
+    try {
+      return await fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache' });
+    } catch (err) {
+      return Response.error();
     }
-    return res;
-  });
+  })());
+});
 
-  e.respondWith(new Promise(resolve => {
-    let done = false;
-    const finish = r => { if (!done && r) { done = true; resolve(r); } };
-
-    const timer = setTimeout(() => {
-      fromCache(e.request).then(finish);          // сеть медлит — есть копия? отдаём её
-    }, WAIT_MS);
-
-    network
-      .then(res => {
-        if (res.ok) { clearTimeout(timer); finish(res); return; }
-        return fromCache(e.request).then(r => { clearTimeout(timer); finish(r || res); });
-      })
-      .catch(() => fromCache(e.request).then(r => { clearTimeout(timer); finish(r || Response.error()); }));
-  }));
+// нажатие на уведомление «Отдых окончен» — открыть приложение
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+      if (cs.length) return cs[0].focus();
+      return self.clients.openWindow('./');
+    })
+  );
 });

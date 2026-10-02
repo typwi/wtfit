@@ -308,10 +308,8 @@ body.flash .container{animation:flash 1.2s ease-out}
 .toast-btn{background:none;border:none;color:var(--accent);font-weight:700;font-size:15px;
   padding:4px 6px;cursor:pointer;flex:none}
 
-/* ---------- загрузка файла ---------- */
-.file-btn{position:relative;overflow:hidden}
-.file-btn input{position:absolute;inset:0;width:100%;height:100%;opacity:0;
-  font-size:100px;cursor:pointer;padding:0;border:none}
+/* ---------- выбор файла (скрытое поле, открывается кнопкой) ---------- */
+.file-hidden{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
 
 /* ---------- иконки ---------- */
 .i{width:18px;height:18px;flex:none;display:inline-block;vertical-align:-3px}
@@ -322,6 +320,9 @@ body.flash .container{animation:flash 1.2s ease-out}
 .toast-ico{color:var(--accent);width:20px;height:20px}
 .warn-line{display:flex;gap:8px;align-items:flex-start}
 .warn-line .i{margin-top:1px}
+.warn-line span{flex:1;min-width:0}
+.hint-x{flex:none;background:none;border:none;padding:0 0 0 4px;margin:-2px -4px 0 0;cursor:pointer;display:flex}
+.hint-x .i{width:18px;height:18px;margin:0}
 .suggest-item.create .i{vertical-align:-3px}
 
 /* ---------- цвета иконок ---------- */
