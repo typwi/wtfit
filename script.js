@@ -759,32 +759,86 @@ function customRestStart(){
 }
 
 /* ---- звук / вибрация / уведомления / экран ---- */
-let AC=null;
+/* Звук. На iPhone Web Audio «засыпает» (состояние suspended / interrupted) после системных окон
+   (например, запроса разрешения на уведомления), звонка или сворачивания приложения.
+   Поэтому: будим его при каждом касании экрана и при возврате в приложение, а если в момент
+   сигнала он всё равно спит — играем запасной звук через обычный <audio>. */
+let AC=null, beepEl=null;
+function acReady(){ return AC && AC.state==='running'; }
 function unlockAudio(){
   try{
-    if(!AC){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return; AC=new C(); }
-    if(AC.state==='suspended') AC.resume();
-    const b=AC.createBuffer(1,1,22050), s=AC.createBufferSource();
-    s.buffer=b; s.connect(AC.destination); s.start(0);
+    if(!AC || AC.state==='closed'){ const C=window.AudioContext||window.webkitAudioContext; if(C) AC=new C(); }
+    if(AC){
+      if(AC.state!=='running'){ const p=AC.resume(); if(p && p.catch) p.catch(()=>{}); }
+      const b=AC.createBuffer(1,1,22050), s=AC.createBufferSource();
+      s.buffer=b; s.connect(AC.destination); s.start(0);
+    }
+  }catch(e){}
+  // запасной звук: «разблокируем» элемент <audio> тихим проигрыванием в момент касания
+  try{
+    if(!beepEl){ beepEl=new Audio(beepWavUrl()); beepEl.preload='auto'; }
+    if(!beepEl.dataset.unlocked){
+      beepEl.muted=true;
+      const p=beepEl.play();
+      const done=()=>{ try{ beepEl.pause(); beepEl.currentTime=0; }catch(_){} beepEl.muted=false; beepEl.dataset.unlocked='1'; };
+      if(p && p.then) p.then(done).catch(()=>{ beepEl.muted=false; }); else done();
+    }
   }catch(e){}
 }
-document.addEventListener('touchend', unlockAudio, {once:true, passive:true});
-function beep(){
+// при каждом касании — только если звук уснул (дёшево)
+document.addEventListener('touchend', ()=>{ if(!acReady() || !(beepEl && beepEl.dataset.unlocked)) unlockAudio(); }, {passive:true});
+document.addEventListener('click', ()=>{ if(!acReady()) unlockAudio(); }, true);
+
+// WAV с тремя сигналами 880 Гц — для запасного проигрывания
+let _beepUrl=null;
+function beepWavUrl(){
+  if(_beepUrl) return _beepUrl;
+  const sr=22050, len=Math.round(sr*0.9), data=new Int16Array(len);
+  [0,0.3,0.6].forEach(st=>{
+    const a=Math.round(st*sr), n=Math.round(0.22*sr);
+    for(let i=0;i<n && a+i<len;i++){
+      const env=Math.min(1, i/(0.02*sr)) * Math.min(1, (n-i)/(0.05*sr));
+      data[a+i]=Math.round(Math.sin(2*Math.PI*880*i/sr)*env*0.45*32767);
+    }
+  });
+  const buf=new ArrayBuffer(44+len*2), v=new DataView(buf);
+  const w=(o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i, s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4,36+len*2,true); w(8,'WAVE'); w(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+  w(36,'data'); v.setUint32(40,len*2,true);
+  new Int16Array(buf,44).set(data);
+  _beepUrl=URL.createObjectURL(new Blob([buf],{type:'audio/wav'}));
+  return _beepUrl;
+}
+function beepWeb(){
+  const t0=AC.currentTime+0.05;
+  [0,0.3,0.6].forEach(dt=>{
+    const o=AC.createOscillator(), g=AC.createGain();
+    o.type='sine'; o.frequency.value=880;
+    g.gain.setValueAtTime(0.0001,t0+dt);
+    g.gain.exponentialRampToValueAtTime(0.3,t0+dt+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dt+0.22);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t0+dt); o.stop(t0+dt+0.25);
+  });
+}
+function beepFallback(){
+  try{
+    if(!beepEl) beepEl=new Audio(beepWavUrl());
+    beepEl.muted=false; beepEl.currentTime=0;
+    const p=beepEl.play(); if(p && p.catch) p.catch(()=>{});
+  }catch(e){}
+}
+async function beep(){
   try{
     if(!AC) unlockAudio();
-    if(!AC) return;
-    if(AC.state==='suspended') AC.resume();
-    const t0=AC.currentTime+0.05;
-    [0,0.3,0.6].forEach(dt=>{
-      const o=AC.createOscillator(), g=AC.createGain();
-      o.type='sine'; o.frequency.value=880;
-      g.gain.setValueAtTime(0.0001,t0+dt);
-      g.gain.exponentialRampToValueAtTime(0.3,t0+dt+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001,t0+dt+0.22);
-      o.connect(g); g.connect(AC.destination);
-      o.start(t0+dt); o.stop(t0+dt+0.25);
-    });
-  }catch(e){}
+    if(AC && AC.state!=='running'){
+      // пробуем разбудить, но не дольше 300 мс
+      await Promise.race([AC.resume().catch(()=>{}), new Promise(r=>setTimeout(r,300))]);
+    }
+    if(acReady()) beepWeb(); else beepFallback();
+  }catch(e){ beepFallback(); }
 }
 // разрешение на уведомления спрашиваем один раз — при первом запуске таймера отдыха
 // (на iPhone работает только в приложении с экрана «Домой», iOS 16.4+)
@@ -795,7 +849,9 @@ function askNotify(){
   try{
     if(!window.Notification || Notification.permission!=='default') return;
     const p=Notification.requestPermission();
-    if(p && p.catch) p.catch(()=>{});
+    // системное окно запроса «усыпляет» звук на iPhone — будим его сразу после ответа
+    const wake=()=>{ try{ if(AC && AC.state!=='running') AC.resume().catch(()=>{}); }catch(_){} };
+    if(p && p.then) p.then(wake, wake);
   }catch(e){}
 }
 function showNote(title, body){
@@ -1344,10 +1400,10 @@ let curProg=null;
 function renderProgList(){
   const box=$('#progList');
   const tools=`<div class="data-row">
-      <button class="btn ghost sm" data-act="import" data-kind="program">${I('download')}Загрузить</button>
       ${DB.programs.length
         ? `<button class="btn ghost sm" data-act="prog-export-all">${I('upload')}Выгрузить все</button>`
         : `<button class="btn ghost sm" data-act="prog-template">${I('copy')}Шаблон для Excel</button>`}
+      <button class="btn ghost sm" data-act="import" data-kind="program">${I('download')}Загрузить</button>
     </div>`;
   if(!DB.programs.length){
     box.innerHTML=tools+`<div class="empty">Пока нет программ.<br>Нажмите +, чтобы создать программу, добавьте прошедшую тренировку из «Статистики» или загрузите таблицу.</div>`;
@@ -1808,19 +1864,21 @@ function openDataSheet(){
   openModal(`<div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
     <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.<br>
     ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}</p>
-    <p class="muted" id="persistInfo"></p>
+    <p class="muted" id="persistInfo">Защита хранилища: проверяется…</p>
     <button class="btn big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
     <button class="btn ghost big" data-act="import" data-kind="backup">${I('swap')}Восстановить из копии</button>
     <button class="btn ghost big" data-act="export">${I('upload')}Выгрузить записи (таблица)</button>
     <button class="btn danger big" data-act="clear-all">${I('trash')}Удалить все данные</button>`);
+  const setInfo=t=>{ const el=$('#persistInfo'); if(el) el.textContent='Защита хранилища: '+t; };
+  const unknown='этот браузер не сообщает — регулярно делайте полную копию.';
   try{
     if(navigator.storage && navigator.storage.persisted)
       navigator.storage.persisted().then(p=>{
-        const el=$('#persistInfo');
-        if(el) el.textContent = p ? 'Хранилище защищено от автоматической очистки.'
-                                  : 'Система может очистить хранилище при нехватке места — регулярно делайте полную копию.';
-      }).catch(()=>{});
-  }catch(e){}
+        setInfo(p ? 'включена, система не удалит данные сама.'
+                  : 'нет — при нехватке места система может очистить данные. Регулярно делайте полную копию.');
+      }).catch(()=>setInfo(unknown));
+    else setInfo(unknown);
+  }catch(e){ setInfo(unknown); }
 }
 
 /* ---- выгрузка ---- */
@@ -2640,6 +2698,7 @@ document.addEventListener('keydown', e=>{
 document.addEventListener('visibilitychange', ()=>{
   if(document.hidden) return;
   renderWorkoutBar();
+  try{ if(AC && AC.state!=='running') AC.resume().catch(()=>{}); }catch(_){}   // разбудить звук после сворачивания
   if(DB.active.restEnd){ tickRest(); requestWake(); }
   if(!$('#modal').classList.contains('show')) refresh();
   checkForgotten();
