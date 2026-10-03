@@ -599,3 +599,10 @@ label.check.pi-warm{margin:0 0 10px;font-size:14px}
 .sw-btn.active{background:rgba(255,176,32,.14);border-color:rgba(255,176,32,.5);color:#ffcf80}
 .sw-btn.active .i{color:#ffb020}
 .grid2 .lbl-row{margin:12px 0 5px}
+
+.lbl-row label{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.grid2 .lbl-row{gap:6px}
+.sw-btn{padding:3px 7px}
+/* строка «Время, мин» + секундомер — той же высоты, что и обычная подпись, чтобы поля стояли ровно */
+.grid2 .lbl-row{height:15px;align-items:center;overflow:visible}
+.grid2 .lbl-row .sw-btn{padding:2px 7px;margin:-6px 0}

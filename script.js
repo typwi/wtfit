@@ -787,7 +787,7 @@ function swSec(){ return swStart ? Math.max(0, Math.round((Date.now()-swStart)/1
 function swRender(){
   const b=$('#swBtn'); if(!b) return;
   b.classList.toggle('active', !!swStart);
-  b.innerHTML = swStart ? `${I('pause')}<span>${fmtClock(swSec())}</span>` : `${I('timer')}<span>старт</span>`;
+  b.innerHTML = swStart ? `${I('pause')}<span>${fmtClock(swSec())}</span>` : `${I('timer')}`;
   if(swStart){ const t=$('#mTime'); if(t) t.value=minIn(swSec()); }
 }
 function swToggle(){
@@ -1830,6 +1830,9 @@ function openWorkout(id){
   if(!recs.length) html+='<div class="empty">Записей пока нет</div>';
   else html+=`<p class="muted" style="margin:10px 2px 0">${I('pause','sm')}— отдых перед подходом (время от предыдущей записи). Нажмите на запись, чтобы исправить или удалить её.</p>`;
   html+=`<button class="btn big" style="margin-top:14px" data-act="w-addrec" data-id="${w.id}">${I('plus')}Добавить упражнение</button>`;
+  if(recs.length) html+=`<div class="grid2" style="margin-top:10px">
+    <button class="btn ghost" data-act="sum-share" data-id="${w.id}">${I('upload')}Картинка</button>
+    <button class="btn ghost" data-act="w-export" data-id="${w.id}">${I('download')}Таблица</button></div>`;
   if(recs.length) html+=`<button class="btn ghost big" data-act="w-toprog" data-id="${w.id}">${I('clip')}Добавить в программу</button>`;
   const fin=!isActive(w);
   html+=`<div class="grid2" style="margin-top:10px">
@@ -2846,11 +2849,12 @@ const PROG_HEAD=['Программа','Папка','Тренировка','Уп�
 function recWorkouts(){ return DB.workouts.filter(w=>DB.records.some(r=>r.wId===w.id)).sort((a,b)=>a.start-b.start); }
 
 // все записи; номер тренировки — сквозной
-function buildRows(){
+function buildRows(onlyW){
   const rows=[EXPORT_HEAD];
   let n=0;
   recWorkouts().forEach(w=>{
     n++;
+    if(onlyW!=null && w.id!==onlyW) return;   // выгрузка одной тренировки — номер остаётся сквозным
     const recs=recsOfW(w.id);
     const dur=isActive(w) ? 0 : wDur(w);
     recs.forEach((r,j)=>{
@@ -2930,6 +2934,16 @@ function exportButtons(){
     <button class="btn ghost big" data-act="export-download">${I('download')}Скачать файл</button>
     <p class="muted" style="margin-top:12px">«Скопировать» — вставка в Numbers / Excel / Google Таблицы сразу разложится по ячейкам.</p>`;
 }
+// выгрузить одну тренировку таблицей
+function openWorkoutExport(wId){
+  const w=wById(wId); if(!w) return;
+  const n=recsOfW(wId).length;
+  exportCtx={kind:'workout', wId};
+  openModal(`<div class="sheet-head"><h2>Выгрузить тренировку</h2><button class="icon-btn" data-act="w-open" data-id="${wId}" aria-label="Назад">${I('x')}</button></div>
+    <p class="muted">Тренировка #${workoutNumber(wId)} · ${fmtDate(w.start)}${w.plan?' · '+esc(w.plan):''} · ${n} ${plural(n,'запись','записи','записей')}.
+    Таблица в том же формате, что и полная выгрузка: её можно открыть в Excel или загрузить обратно (повторы не задублируются).</p>
+    ${exportButtons()}`);
+}
 function openExport(){
   const ws=recWorkouts();
   if(!ws.length && !DB.exercises.length){ toast('Пока нечего выгружать'); return; }
@@ -2962,6 +2976,10 @@ function exportPayload(){
     return {file:text, copy:text, name:`WTFIT_копия_${today}.json`, mime:'application/json', backup:true};
   }
   if(exportCtx.kind==='template') return csvPayload(templateRows(), 'Шаблон_программы.csv');
+  if(exportCtx.kind==='workout'){
+    const w=wById(exportCtx.wId); if(!w){ toast('Тренировка не найдена'); return null; }
+    return csvPayload(buildRows(w.id), `WTFIT_тренировка_${dayKey(w.start)}.csv`);
+  }
   const progs=(exportCtx.ids||[]).map(progById).filter(Boolean);
   if(!progs.length){ toast('Нет программ для выгрузки'); return null; }
   return csvPayload(buildProgramRows(progs), progs.length===1 ? `Программа_${safeFile(progs[0].name)}.csv` : `Программы_${today}.csv`);
@@ -3603,6 +3621,7 @@ document.addEventListener('click', e=>{
     case 'w-label-save':     saveWorkoutLabel(id); break;
     case 'auto-src':         setAutoSrc(el.dataset.src); break;
     case 'sw-toggle':        swToggle(); break;
+    case 'w-export':         openWorkoutExport(id); break;
     case 'sum-share':        shareSummary(id); break;
     case 'fill-chip':        fillChip(el.dataset.src, +el.dataset.i); break;
     case 'fill-plan-ex':     fillFromPlanEx(); break;
