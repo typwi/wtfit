@@ -746,8 +746,7 @@ function renderLastHint(){
       }${c.prevSets.map((r,i)=>chip(r,i,(c.cur&&i<c.done?' done':'')+(n.warm===false&&i===n.i?' next':''),'prev')).join('')}</div>`;
   }
   if(c.plan){
-    const pr2=c.plan.it && c.plan.it.rest!=null ? ` · ${restLabel(c.plan.it.rest)}` : '';
-    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · <b>${c.plan.done} из ${c.plan.need}</b>${pr2}</div>${sw('plan')}</div>
+    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · <b>${c.plan.done} из ${c.plan.need}</b></div>${sw('plan')}</div>
       <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>`;
   }
   if(!c.prev && c.today){
