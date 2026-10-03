@@ -591,3 +591,11 @@ label.check.pi-warm{margin:0 0 10px;font-size:14px}
 .auto-sw.active .warm-sw::after{transform:translateX(12px)}
 .hint-row{min-height:26px}
 .hint-note,.plan-next-note{font-size:13px;color:var(--warn);font-style:italic;margin-top:2px;line-height:1.35}
+
+/* секундомер у поля «Время» */
+.sw-btn{display:flex;align-items:center;gap:4px;flex:none;padding:3px 8px;border-radius:12px;cursor:pointer;
+  background:var(--card2);border:1px solid var(--border);color:#9ec4ff;font-family:inherit;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.sw-btn .i{width:14px;height:14px}
+.sw-btn.active{background:rgba(255,176,32,.14);border-color:rgba(255,176,32,.5);color:#ffcf80}
+.sw-btn.active .i{color:#ffb020}
+.grid2 .lbl-row{margin:12px 0 5px}

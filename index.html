@@ -127,7 +127,10 @@
           </div>
         </div>
         <div>
-          <label for="mTime">Время (мин)</label>
+          <div class="lbl-row">
+            <label for="mTime">Время (мин)</label>
+            <button type="button" class="sw-btn" id="swBtn" data-act="sw-toggle" aria-label="Секундомер"></button>
+          </div>
           <div class="stepper">
             <button type="button" data-act="step" data-for="mTime" data-d="-1"><svg class="i ic-minus" aria-hidden="true"><use href="#i-minus"></use></svg></button>
             <input id="mTime" inputmode="decimal" placeholder="0" autocomplete="off">

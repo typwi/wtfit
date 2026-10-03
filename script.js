@@ -629,6 +629,7 @@ function setWarm(on){
   const b=$('#warmBtn'); if(b){ b.classList.toggle('active', warmOn); b.setAttribute('aria-pressed', warmOn?'true':'false'); }
 }
 function clearForm(withName){
+  if(swStart){ swStart=null; clearInterval(swTimer); swTimer=null; try{ localStorage.removeItem(SW_KEY); }catch(e){} swRender(); }
   NUM_FIELDS.forEach(id=>$('#'+id).value='');
   $('#mNotes').value='';
   setWarm(false);
@@ -778,8 +779,44 @@ function renderToday(){
 }
 
 let saveGuard=0;
+/* ---- секундомер поля «Время»: старт/стоп у поля, минуты пишутся сами; переживает сворачивание ---- */
+const SW_KEY='fitness_stopwatch';
+let swStart=null, swTimer=null;
+try{ const v=+localStorage.getItem(SW_KEY); if(v>0) swStart=v; }catch(e){}
+function swSec(){ return swStart ? Math.max(0, Math.round((Date.now()-swStart)/1000)) : 0; }
+function swRender(){
+  const b=$('#swBtn'); if(!b) return;
+  b.classList.toggle('active', !!swStart);
+  b.innerHTML = swStart ? `${I('pause')}<span>${fmtClock(swSec())}</span>` : `${I('timer')}<span>старт</span>`;
+  if(swStart){ const t=$('#mTime'); if(t) t.value=minIn(swSec()); }
+}
+function swToggle(){
+  if(swStart){ swStop(true); return; }
+  unlockAudio();
+  swStart=Date.now();
+  try{ localStorage.setItem(SW_KEY, String(swStart)); }catch(e){}
+  clearInterval(swTimer); swTimer=setInterval(swRender, 500);
+  swRender();
+  requestWakeAny();
+}
+function swStop(announce){
+  if(!swStart) return 0;
+  const sec=swSec();
+  swStart=null; clearInterval(swTimer); swTimer=null;
+  try{ localStorage.removeItem(SW_KEY); }catch(e){}
+  const t=$('#mTime'); if(t){ t.value = sec ? minIn(sec) : ''; markBad(t,false); }
+  swRender();
+  if(announce) toast(`Время: ${fmtDur(sec)}`, null, null, 2000, 'timer');
+  return sec;
+}
+// экран не гаснет, пока идёт секундомер (если браузер умеет)
+async function requestWakeAny(){
+  try{ if(!wakeLock && 'wakeLock' in navigator && !document.hidden){ wakeLock=await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release',()=>{ wakeLock=null; }); } }catch(e){}
+}
+
 function saveRecord(){
   if(Date.now()-saveGuard<700) return;
+  if(swStart) swStop(false);           // секундомер идёт — останавливаем и берём его время
   const name=cleanName(exInput.value);
   if(!name){ toast('Введите название упражнения'); exInput.focus(); return; }
   if(!checkLimits([['mWeight','weight'],['mReps','reps'],['mSets','sets'],['mTime','time']])) return;
@@ -870,6 +907,104 @@ async function stopWorkout(){
   else toast('Пустая тренировка не сохранена');
 }
 
+/* ---- картинка итога: PNG 1080×1350 с логотипом, цифрами, рекордами и упражнениями ---- */
+function loadImg(src){ return new Promise(res=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>res(null); im.src=src; }); }
+function exSummaryLines(wId){
+  const recs=recsOfW(wId), order=[], by=new Map();
+  recs.forEach(r=>{ if(!by.has(r.exId)){ by.set(r.exId,[]); order.push(r.exId); } by.get(r.exId).push(r); });
+  return order.map(exId=>{
+    const ex=exById(exId), rs=by.get(exId), work=rs.filter(isWork);
+    const n=expandSets(work).length;
+    let top=null; work.forEach(r=>{ if(r.weight && (!top || r.weight>top.weight || (r.weight===top.weight && (r.reps||0)>(top.reps||0)))) top=r; });
+    const time=rs.reduce((a,r)=>a+(r.time||0),0);
+    let d;
+    if(top) d=`${n} ${plural(n,'подход','подхода','подходов')} · ${fmtNum(top.weight)}×${fmtNum(top.reps||0)}`;
+    else if(time) d=fmtDur(time);
+    else { const reps=work.reduce((a,r)=>a+(r.reps||0)*setUnits(r),0); d = n ? `${n} ${plural(n,'подход','подхода','подходов')}${reps?' · '+fmtNum(reps)+' повт':''}` : 'разминка'; }
+    return {name: ex?ex.name:'?', d};
+  });
+}
+async function summaryImage(wId){
+  const w=wById(wId); if(!w) return null;
+  const st=wStats(w), prs=workoutPRs(wId), lines=exSummaryLines(wId);
+  const W=1080, P=72, th=130, ROW=58;
+  const L=lines.slice(0,14), nPr=Math.min(3,prs.length);
+  // высота картинки под содержимое (не меньше 1350 — формат 4:5)
+  const H=Math.max(1350, P+230+50+2*th+24+76 + (nPr?50+nPr*44+40:0) + 24+L.length*ROW + (lines.length>L.length?ROW:0) + 90);
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const F=(wt,sz)=>`${wt} ${sz}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+  const fit=(t,max)=>{ if(c.measureText(t).width<=max) return t; while(t.length>1 && c.measureText(t+'…').width>max) t=t.slice(0,-1); return t+'…'; };
+  const rr=(x,y,w2,h2,r)=>{ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w2,y,x+w2,y+h2,r); c.arcTo(x+w2,y+h2,x,y+h2,r); c.arcTo(x,y+h2,x,y,r); c.arcTo(x,y,x+w2,y,r); c.closePath(); };
+  // фон
+  const g=c.createLinearGradient(0,0,0,H); g.addColorStop(0,'#0f1115'); g.addColorStop(1,'#0b1a33');
+  c.fillStyle=g; c.fillRect(0,0,W,H);
+  // шапка: логотип + WTFIT
+  const logo=await loadImg('icon-512.png');
+  if(logo){ c.save(); rr(P,P,120,120,26); c.clip(); c.drawImage(logo,P,P,120,120); c.restore(); }
+  c.fillStyle='#4f8cff'; c.font=F(800,64); c.textBaseline='alphabetic';
+  c.fillText('WTFIT', P+150, P+78);
+  c.fillStyle='#8b93a7'; c.font=F(500,32);
+  const d=new Date(w.start);
+  c.fillText(`${['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'][d.getDay()]}, ${fmtDate(w.start)}`, P+152, P+118);
+  // подпись тренировки
+  let y=P+230;
+  c.fillStyle='#e8eaed'; c.font=F(800,58);
+  c.fillText(fit(w.plan||'Тренировка', W-2*P), P, y);
+  // плитки
+  y+=50;
+  const tiles=[['Длительность', st.dur?fmtDur(st.dur):'—'],['Тоннаж', st.ton?fmtTon(st.ton):'—'],['Рабочих подходов', String(st.sets)],['Упражнений', String(st.ex)]];
+  const tw=(W-2*P-24)/2;
+  tiles.forEach((t,i)=>{
+    const x=P+(i%2)*(tw+24), yy=y+Math.floor(i/2)*(th+24);
+    c.fillStyle='rgba(255,255,255,0.05)'; rr(x,yy,tw,th,24); c.fill();
+    c.strokeStyle='rgba(79,140,255,0.25)'; c.lineWidth=2; c.stroke();
+    c.fillStyle='#8b93a7'; c.font=F(600,28); c.fillText(t[0].toUpperCase(), x+30, yy+52);
+    c.fillStyle='#ffffff'; c.font=F(800,50); c.fillText(fit(t[1], tw-60), x+30, yy+106);
+  });
+  y+=2*th+24+76;
+  // рекорды
+  if(prs.length){
+    c.fillStyle='#ffd166'; c.font=F(800,36); c.fillText(`РЕКОРДЫ: ${prs.length}`, P, y);
+    c.font=F(500,32); c.fillStyle='#ffe3a3';
+    prs.slice(0,3).forEach((x,i)=>c.fillText(fit(x.text, W-2*P), P, y+50+i*44));
+    y+=50+Math.min(3,prs.length)*44+40;
+  }
+  // упражнения
+  c.fillStyle='#8b93a7'; c.font=F(700,30); c.fillText('УПРАЖНЕНИЯ', P, y); y+=24;
+  const shown=L;
+  shown.forEach((l,i)=>{
+    const yy=y+44+i*ROW;
+    c.fillStyle='#e8eaed'; c.font=F(600,36); c.fillText(fit(l.name, W*0.5), P, yy);
+    c.fillStyle='#9ec4ff'; c.font=F(600,34); c.textAlign='right'; c.fillText(fit(l.d, W*0.4), W-P, yy); c.textAlign='left';
+    c.strokeStyle='rgba(255,255,255,0.06)'; c.lineWidth=2; c.beginPath(); c.moveTo(P, yy+20); c.lineTo(W-P, yy+20); c.stroke();
+  });
+  if(lines.length>shown.length){ c.fillStyle='#8b93a7'; c.font=F(500,32); c.fillText(`и ещё ${lines.length-shown.length}…`, P, y+44+shown.length*ROW); }
+  // подвал
+  c.fillStyle='rgba(79,140,255,0.9)'; c.fillRect(0,H-14,W,14);
+  return new Promise(res=>cv.toBlob(b=>res(b),'image/png'));
+}
+async function shareSummary(wId){
+  const w=wById(wId); if(!w) return;
+  toast('Готовлю картинку…', null, null, 1500);
+  const blob=await summaryImage(wId);
+  if(!blob){ toast('Не удалось нарисовать картинку'); return; }
+  const name=`WTFIT_${dayKey(w.start)}.png`;
+  const file=new File([blob], name, {type:'image/png'});
+  try{
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file], title:'WTFIT'});
+      return;
+    }
+  }catch(e){ if(e && e.name==='AbortError') return; }
+  // запасной вариант: показать картинку — долгое нажатие → «Сохранить в Фото»
+  const url=URL.createObjectURL(blob);
+  openModal(`<div class="sheet-head"><h2>Итог тренировки</h2>${closeX()}</div>
+    <img src="${url}" alt="Итог тренировки" style="width:100%;border-radius:14px;display:block">
+    <p class="muted" style="margin:10px 2px 0">Нажмите и удерживайте картинку → «Сохранить в Фото» или «Поделиться».</p>
+    <a class="btn ghost big" href="${url}" download="${name}">${I('download')}Скачать</a>`);
+}
+
 /* ---- итог тренировки ---- */
 // рекорды, поставленные в тренировке: сравнение с тем, что было до каждой записи
 function workoutPRs(wId){
@@ -942,7 +1077,8 @@ function openSummary(wId){
   }
   html+=`<div class="grid2" style="margin-top:14px">
     <button class="btn ghost" data-act="w-open" data-id="${w.id}">Подробнее</button>
-    <button class="btn" data-act="close-modal">Готово</button></div>`;
+    <button class="btn" data-act="close-modal">Готово</button></div>
+    <button class="btn ghost big" data-act="sum-share" data-id="${w.id}">${I('upload')}Поделиться картинкой</button>`;
   openModal(html);
 }
 function renderWorkoutBar(){
@@ -3466,6 +3602,8 @@ document.addEventListener('click', e=>{
     case 'w-rename-active':  if(DB.active.wId) renameWorkout(DB.active.wId); break;
     case 'w-label-save':     saveWorkoutLabel(id); break;
     case 'auto-src':         setAutoSrc(el.dataset.src); break;
+    case 'sw-toggle':        swToggle(); break;
+    case 'sum-share':        shareSummary(id); break;
     case 'fill-chip':        fillChip(el.dataset.src, +el.dataset.i); break;
     case 'fill-plan-ex':     fillFromPlanEx(); break;
     case 'w-summary':        openSummary(id); break;
@@ -3621,6 +3759,8 @@ if('serviceWorker' in navigator && location.protocol==='https:'){
 
 /* ================== СТАРТ ================== */
 initTopRest();
+if(swStart){ swTimer=setInterval(swRender, 500); }
+swRender();
 renderRestPresets();
 $$('.note-toggle').forEach(b=>b.classList.toggle('active', notesOn));
 $('#scroller').addEventListener('scroll', ()=>{ if(DB.active.restEnd) updateTopRest(); }, {passive:true});
