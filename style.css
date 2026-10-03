@@ -580,3 +580,14 @@ label.check.pi-warm{margin:0 0 10px;font-size:14px}
 .warm-btn.sm .warm-sw{width:30px;height:18px;border-radius:9px}
 .warm-btn.sm .warm-sw::after{width:12px;height:12px;top:3px;left:3px}
 .warm-btn.sm.active .warm-sw::after{transform:translateX(12px)}
+
+/* тумблер «авто» в строках подсказки */
+.auto-sw{flex:none;display:flex;align-items:center;gap:6px;padding:3px 9px 3px 4px;border-radius:14px;cursor:pointer;
+  background:var(--card2);border:1px solid var(--border);color:var(--muted);font-family:inherit;font-size:12px;font-weight:600}
+.auto-sw .warm-sw{width:28px;height:16px;border-radius:8px}
+.auto-sw .warm-sw::after{width:10px;height:10px;top:3px;left:3px}
+.auto-sw.active{border-color:var(--accent);background:rgba(79,140,255,.12);color:#9ec4ff}
+.auto-sw.active .warm-sw{background:var(--accent)}
+.auto-sw.active .warm-sw::after{transform:translateX(12px)}
+.hint-row{min-height:26px}
+.hint-note,.plan-next-note{font-size:13px;color:var(--warn);font-style:italic;margin-top:2px;line-height:1.35}

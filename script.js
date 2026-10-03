@@ -558,7 +558,7 @@ exSuggest.addEventListener('click', e=>{
   else { const ex=exById(+it.dataset.exid); if(ex) exInput.value=ex.name; }
   hideSuggest();
   exInput.blur();
-  if(normKey(exInput.value)!==lastExKey){ lastExKey=normKey(exInput.value); setWarm(false); }
+  if(normKey(exInput.value)!==lastExKey){ lastExKey=normKey(exInput.value); setWarm(false); if(formEmpty()) autoFillNext(false); }
   renderLastHint(); renderPlanNext();
 });
 
@@ -682,6 +682,49 @@ function stepInput(id, d){
   if(id==='mWeight') renderLastHint();
 }
 
+/* Автоподстановка: после «Сохранить» (и при выборе упражнения) в поля сразу ставится следующий подход —
+   из прошлой тренировки или из программы. Источник выбирается тумблером «авто» в строке; повторное
+   нажатие выключает. Любой чип по-прежнему подставляется нажатием. */
+const AUTOFILL_KEY='fitness_autofill';
+let autoSrc='plan';
+try{ const v=localStorage.getItem(AUTOFILL_KEY); if(v==='prev'||v==='plan'||v==='off') autoSrc=v; }catch(e){}
+function setAutoSrc(src){
+  autoSrc = autoSrc===src ? 'off' : src;
+  try{ localStorage.setItem(AUTOFILL_KEY, autoSrc); }catch(e){}
+  if(autoSrc!=='off') autoFillNext(false);
+  renderLastHint();
+  toast(autoSrc==='off' ? 'Автоподстановка выключена'
+    : autoSrc==='plan' ? 'После сохранения подставится следующий подход программы'
+    : 'После сохранения подставится следующий подход прошлой тренировки', null, null, 2500, autoSrc==='off'?null:'repeat');
+}
+// какой подход прошлой тренировки следующий: сначала разминка, потом рабочие
+function prevNextIdx(c){
+  if(c.done===0 && c.warmDone<c.prevWarm.length) return {warm:true, i:c.warmDone};
+  return {warm:false, i:c.done};
+}
+// подставить следующий подход по выбранному источнику; moveOn — можно ли перейти к следующему упражнению программы
+function autoFillNext(moveOn){
+  if(autoSrc==='off') return false;
+  const ex=exByName(exInput.value);
+  const c=ex ? hintCtx(ex) : null;
+  const usePlan = autoSrc==='plan' && planCtx();
+  if(usePlan && c && c.plan){
+    if(c.plan.next>=0){ const ch=c.plan.chips[c.plan.next]; fillSet(ch.it, ch.warm); return true; }
+    if(moveOn){
+      // все подходы этого упражнения по программе сделаны — переходим к следующему пункту программы
+      const x=planCtx(), i=planStatus(x).findIndex(s2=>!s2.ok);
+      if(i>=0){ fillFromPlan(i, true); toast(`Дальше: ${exInput.value}`, null, null, 2500, 'repeat'); return true; }
+    }
+    return false;
+  }
+  // упражнения нет в программе (или программа не идёт) — берём из прошлой тренировки
+  if(c && c.prev){
+    const n=prevNextIdx(c);
+    const r = n.warm ? c.prevWarm[n.i] : c.prevSets[n.i];
+    if(r){ fillSet(r, n.warm); return true; }
+  }
+  return false;
+}
 function renderLastHint(){
   const box=$('#lastHint');
   const ex=exByName(exInput.value);
@@ -692,28 +735,24 @@ function renderLastHint(){
     return;
   }
   const chip=(r,i,cls,src)=>`<button type="button" class="hs${cls}" data-act="fill-chip" data-src="${src}" data-i="${i}">${esc(setLabel(r))}</button>`;
-  const chips=(sets, done, src, warm)=>`<div class="hint-sets">${
-    (warm||[]).map((r,i)=>chip(r,i,' warm'+(i<c.warmDone?' done':''),'warm')).join('')
-    }${sets.map((r,i)=>chip(r,i,(i<done?' done':'')+(i===done?' next':''),src)).join('')}</div>`;
+  const sw=src=>{ const on = autoSrc===src || (autoSrc==='plan' && src==='prev' && !c.plan);
+    return `<button type="button" class="auto-sw${on?' active':''}" data-act="auto-src" data-src="${src}" aria-pressed="${on}"><span class="warm-sw"></span>авто</button>`; };
   let html='<div class="hint-card hint-col">';
   if(c.prev){
-    html+=`<div class="hint-row"><div class="hint-lbl">Прошлый раз · ${relDay(c.prev.recs[0].ts)}${c.cur?` · сегодня <b>${c.done} из ${c.prevSets.length}</b>`:''}</div>
-      <button class="btn ghost sm" data-act="fill-last">Подставить</button></div>${chips(c.prevSets, c.cur?c.done:-1, 'prev', c.prevWarm)}`;
+    const n=c.cur ? prevNextIdx(c) : {warm:null,i:-1};
+    html+=`<div class="hint-row"><div class="hint-lbl">Прошлый раз · ${relDay(c.prev.recs[0].ts)}${c.cur?` · сегодня <b>${c.done} из ${c.prevSets.length}</b>`:''}</div>${sw('prev')}</div>
+      <div class="hint-sets">${
+        c.prevWarm.map((r,i)=>chip(r,i,' warm'+(i<c.warmDone?' done':'')+(n.warm===true&&i===n.i?' next':''),'warm')).join('')
+      }${c.prevSets.map((r,i)=>chip(r,i,(c.cur&&i<c.done?' done':'')+(n.warm===false&&i===n.i?' next':''),'prev')).join('')}</div>`;
   }
   if(c.plan){
     const pr2=c.plan.it && c.plan.it.rest!=null ? ` · ${restLabel(c.plan.it.rest)}` : '';
-    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · <b>${c.plan.done} из ${c.plan.need}</b>${pr2}</div>
-      <button class="btn ghost sm" data-act="fill-plan-ex">Подставить</button></div>
+    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · <b>${c.plan.done} из ${c.plan.need}</b>${pr2}</div>${sw('plan')}</div>
       <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>`;
   }
   if(!c.prev && c.today){
     html+=`<div class="hint-lbl">Раньше не делали · сегодня <b>${c.done} ${plural(c.done,'рабочий подход','рабочих подхода','рабочих подходов')}</b>${c.warmDone?` + ${c.warmDone} разм.`:''}</div>`;
   }
-  const pr=exPR(ex.id), wv=num($('#mWeight').value), parts=[];
-  if(pr.maxW) parts.push(`макс ${fmtNum(pr.maxW)} кг`);
-  if(pr.e1) parts.push(`1ПМ ≈ ${fmtNum(round(pr.e1,1))} кг`);
-  if(wv && pr.byW.has(wv)) parts.push(`на ${fmtNum(wv)} кг — ${fmtNum(pr.byW.get(wv).reps)} повт`);
-  if(parts.length) html+=`<div class="muted hint-pr">${I('trophy','sm')}${parts.join(' · ')}</div>`;
   box.innerHTML=html+'</div>';
 }
 
@@ -786,6 +825,7 @@ function saveRecord(){
   if(arMode==='fixed') restSec=lastRest;
   if(arMode!=='off' && DB.active.wId && (reps || weight) && restSec>0){ startRest(restSec, true); autoStarted=true; }
   renderRecord();
+  autoFillNext(true);
 
   toast((prMsg||(rec.warm?'Разминка сохранена':'Сохранено'))+(autoStarted?` · отдых ${fmtClock(restSec)}`:''), 'Отменить', ()=>{
     if(autoStarted && DB.active.restEnd){ DB.active.restEnd=null; DB.active.restTotal=0; save(); hideRest(); }
@@ -2504,7 +2544,8 @@ function renderPlan(){
       return `<div class="plan-next-row" data-act="plan-next" data-i="${next}">
         <div class="rec-main"><div class="plan-next-lbl">Далее${s2.need>1?` · подход ${s2.done+1} из ${s2.need}`:''}</div>
           <div class="rec-name">${it.warm?WARM_TAG:''}${esc(e?e.name:'?')}</div>
-          <div class="rec-desc">${planDesc(it)}</div></div>
+          <div class="rec-desc">${planDesc(it)}</div>
+          ${it.notes?`<div class="plan-next-note">«${esc(it.notes)}»</div>`:''}</div>
         <span class="plan-next-btn">Подставить</span></div>`; })() : ''}
     ${st.length && next<0 ? `<div class="plan-done">${I('flag')}Все упражнения выполнены</div>` : ''}
   </div>`;
@@ -3421,6 +3462,7 @@ document.addEventListener('click', e=>{
     case 'w-rename':         renameWorkout(id); break;
     case 'w-rename-active':  if(DB.active.wId) renameWorkout(DB.active.wId); break;
     case 'w-label-save':     saveWorkoutLabel(id); break;
+    case 'auto-src':         setAutoSrc(el.dataset.src); break;
     case 'fill-chip':        fillChip(el.dataset.src, +el.dataset.i); break;
     case 'fill-plan-ex':     fillFromPlanEx(); break;
     case 'w-summary':        openSummary(id); break;
