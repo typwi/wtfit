@@ -188,7 +188,8 @@ function normPrograms(arr){
     folders:A(p.folders).filter(f=>f && cleanName(f.name)).map(f=>({id:+f.id, name:cleanName(f.name),
       days:A(f.days).filter(x=>x && cleanName(x.name)).map(x=>({id:+x.id, name:cleanName(x.name),
         items:A(x.items).filter(it=>it && it.exId!=null).map(it=>({exId:+it.exId,
-          reps:num(it.reps), sets:num(it.sets), weight:num(it.weight), time:num(it.time), notes:it.notes?String(it.notes):''}))}))}))}));
+          reps:num(it.reps), sets:num(it.sets), weight:num(it.weight), time:num(it.time), notes:it.notes?String(it.notes):'',
+          warm:!!it.warm, rest:(it.rest===0||it.rest==='0') ? 0 : num(it.rest)}))}))}))}));
 }
 
 // перенос данных из прошлой версии (fitness_v3: логи по одной метрике)
@@ -397,6 +398,17 @@ function gapHtml(gaps, r, cls){
   return g!=null ? `<span class="gap${cls?' '+cls:''}">${I('pause','sm')}${fmtGap(g)}</span>` : '';
 }
 
+// «отдых 3 мин» для пункта программы
+function restLabel(sec){
+  if(sec===0) return 'без отдыха';
+  if(!sec) return '';
+  const m=sec/60;
+  return 'отдых '+(m>=1 ? fmtNum(round(m,1))+' мин' : sec+' сек');
+}
+function planDesc(it){
+  return [esc(describe(it))||'—', it.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(it.rest)}</span>`:''].filter(Boolean).join(' ');
+}
+
 function rxs(r){
   if(r.reps && r.sets) return `${fmtNum(r.reps)}×${fmtNum(r.sets)}`;
   if(r.reps) return fmtNum(r.reps);
@@ -564,11 +576,17 @@ function hintCtx(ex){
   const x=planCtx();
   if(x){
     const st=planStatus(x);
-    let i=x.d.items.findIndex((it,k)=>it.exId===ex.id && !st[k].ok);
-    if(i<0) i=x.d.items.findIndex(it=>it.exId===ex.id);
-    if(i>=0){
-      const it=x.d.items[i];
-      plan={i, it, day:x.d.name, need:st[i].need, done:st[i].done, sets:Array.from({length:st[i].need},()=>it)};
+    const idx=x.d.items.map((it,k)=>k).filter(k=>x.d.items[k].exId===ex.id);
+    if(idx.length){
+      // чипы: каждый пункт развёрнут по подходам; отмечаем сделанные
+      const chips=[];
+      idx.forEach(k=>{ const it=x.d.items[k], s=st[k];
+        for(let j=0;j<s.need;j++) chips.push({it, k, done:j<s.done, warm:!!it.warm}); });
+      const nextChip=chips.findIndex(c=>!c.done);
+      const work=idx.filter(k=>!x.d.items[k].warm);
+      const need=work.reduce((a,k)=>a+st[k].need,0), wdone=work.reduce((a,k)=>a+st[k].done,0);
+      plan={day:x.d.name, chips, next:nextChip, need, done:wdone,
+        it: nextChip>=0 ? chips[nextChip].it : x.d.items[idx[idx.length-1]]};
     }
   }
   return {cur, prev, today, done, prevSets, prevWarm, warmDone, plan};
@@ -593,14 +611,15 @@ function fillFromLast(){
 function fillFromPlanEx(){
   const ex=exByName(exInput.value); if(!ex) return;
   const c=hintCtx(ex); if(!c.plan) return;
-  fillSet(c.plan.it);
+  fillSet(c.plan.it, c.plan.it.warm);
 }
 // нажатие на конкретный подход
 function fillChip(src, i){
   const ex=exByName(exInput.value); if(!ex) return;
   const c=hintCtx(ex);
   if(src==='warm') fillSet(c.prevWarm[i], true);
-  else fillSet(src==='plan' ? (c.plan && c.plan.it) : c.prevSets[i]);
+  else if(src==='plan'){ const ch=c.plan && c.plan.chips[i]; if(ch) fillSet(ch.it, ch.warm); }
+  else fillSet(c.prevSets[i]);
 }
 /* Тумблер «Разминка»: такие подходы не считаются рабочими (счётчики «N из M», план, рекорды, 1ПМ),
    но входят в тоннаж. Остаётся включённым для следующего подхода, сбрасывается при смене упражнения. */
@@ -682,8 +701,10 @@ function renderLastHint(){
       <button class="btn ghost sm" data-act="fill-last">Подставить</button></div>${chips(c.prevSets, c.cur?c.done:-1, 'prev', c.prevWarm)}`;
   }
   if(c.plan){
-    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · ${esc(c.plan.day)} · <b>${c.plan.done} из ${c.plan.need}</b></div>
-      <button class="btn ghost sm" data-act="fill-plan-ex">Подставить</button></div>${chips(c.plan.sets, c.plan.done, 'plan')}`;
+    const pr2=c.plan.it && c.plan.it.rest!=null ? ` · ${restLabel(c.plan.it.rest)}` : '';
+    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · ${esc(c.plan.day)} · <b>${c.plan.done} из ${c.plan.need}</b>${pr2}</div>
+      <button class="btn ghost sm" data-act="fill-plan-ex">Подставить</button></div>
+      <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>`;
   }
   if(!c.prev && c.today){
     html+=`<div class="hint-lbl">Раньше не делали · сегодня <b>${c.done} ${plural(c.done,'рабочий подход','рабочих подхода','рабочих подходов')}</b>${c.warmDone?` + ${c.warmDone} разм.`:''}</div>`;
@@ -753,10 +774,19 @@ function saveRecord(){
   try{ navigator.vibrate && navigator.vibrate(30); }catch(e){}
   // автоотдых — только во время идущей тренировки и не для кардио «по времени»
   let autoStarted=false;
-  if(autoRest && DB.active.wId && (reps || weight)){ startRest(lastRest, true); autoStarted=true; }
+  let restSec=lastRest;
+  const px=planCtx();
+  if(px){
+    // пункт программы, к которому относится этот подход: последний пункт этого упражнения и типа, где уже есть выполненные подходы
+    const st=planStatus(px);
+    let k=-1;
+    px.d.items.forEach((it,i)=>{ if(it.exId===ex.id && !!it.warm===!!rec.warm && st[i].done>0) k=i; });
+    if(k>=0 && px.d.items[k].rest!=null) restSec=px.d.items[k].rest;
+  }
+  if(autoRest && DB.active.wId && (reps || weight) && restSec>0){ startRest(restSec, true); autoStarted=true; }
   renderRecord();
 
-  toast((prMsg||(rec.warm?'Разминка сохранена':'Сохранено'))+(autoStarted?` · отдых ${fmtClock(lastRest)}`:''), 'Отменить', ()=>{
+  toast((prMsg||(rec.warm?'Разминка сохранена':'Сохранено'))+(autoStarted?` · отдых ${fmtClock(restSec)}`:''), 'Отменить', ()=>{
     if(autoStarted && DB.active.restEnd){ DB.active.restEnd=null; DB.active.restTotal=0; save(); hideRest(); }
     DB.records=DB.records.filter(r=>r.id!==rec.id);
     if(createdEx && !DB.records.some(r=>r.exId===ex.id)) DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
@@ -2230,8 +2260,8 @@ function openDay(id){
         const e=exById(it.exId);
         return `<div class="rec-row" data-act="day-edit" data-id="${d.id}">
           <span class="plan-mark">${i+1}</span>
-          <div class="rec-main"><div class="rec-name">${esc(e?e.name:'?')}</div>
-            <div class="rec-desc">${esc(describe(it))||'—'}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
+          <div class="rec-main"><div class="rec-name">${it.warm?WARM_TAG:''}${esc(e?e.name:'?')}</div>
+            <div class="rec-desc">${planDesc(it)}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
         </div>`;
       }).join('')}</div>`
     : '<div class="empty" style="padding:20px 10px">Упражнений пока нет — нажмите «Изменить»</div>';
@@ -2262,7 +2292,8 @@ async function deleteDay(id){
 
 /* ---- редактор тренировки программы ---- */
 let dayDraft=null;
-function emptyItem(){ return {name:'', reps:'', sets:'', weight:'', time:'', notes:''}; }
+function emptyItem(){ return {name:'', reps:'', sets:'', weight:'', time:'', notes:'', rest:'', warm:false}; }
+const restIn = sec => sec===0 ? '0' : (sec ? inVal(round(sec/60,2)) : '');
 function openDayEdit(id, folderId){
   const x=id ? findDay(id) : null;
   if(id && !x) return;
@@ -2272,7 +2303,8 @@ function openDayEdit(id, folderId){
     id:id||null, progId:fx.p.id, folderId:fx.f.id,
     name: x ? x.d.name : nextName('Тренировка '+fx.f.days.length, fx.f.days.map(d=>d.name)),
     items: x ? x.d.items.map(it=>{ const e=exById(it.exId);
-      return {name:e?e.name:'', reps:inVal(it.reps), sets:inVal(it.sets), weight:inVal(it.weight), time:minIn(it.time), notes:it.notes||''}; }) : []
+      return {name:e?e.name:'', reps:inVal(it.reps), sets:inVal(it.sets), weight:inVal(it.weight), time:minIn(it.time), notes:it.notes||'',
+        rest:restIn(it.rest), warm:!!it.warm}; }) : []
   };
   if(!dayDraft.items.length) dayDraft.items.push(emptyItem());
   renderDayEdit(x ? null : 0);
@@ -2295,6 +2327,10 @@ function renderDayEdit(focusIdx){
         <label class="pi-l">Повт<input class="pi-reps" inputmode="decimal" value="${esc(it.reps)}" placeholder="—" autocomplete="off"></label>
         <label class="pi-l">Подх<input class="pi-sets" inputmode="decimal" value="${esc(it.sets)}" placeholder="—" autocomplete="off"></label>
         <label class="pi-l">Мин<input class="pi-time" inputmode="decimal" value="${esc(it.time)}" placeholder="—" autocomplete="off"></label>
+      </div>
+      <div class="pi-row2">
+        <label class="pi-l pi-rest">Отдых, мин<input class="pi-restv" inputmode="decimal" value="${esc(it.rest)}" placeholder="—" autocomplete="off"></label>
+        <label class="check pi-warm"><input type="checkbox" class="pi-warmv"${it.warm?' checked':''}>Разминка</label>
       </div>
       <input class="pi-notes" value="${esc(it.notes)}" placeholder="Заметка (необязательно)" autocomplete="off">
     </div>`).join('');
@@ -2324,7 +2360,8 @@ function readDayDraft(){
   const f=$('#dFolder'); if(f) D.folderId=+f.value;
   D.items=$$('#dItems .pi').map(el=>{
     const g=c=>el.querySelector(c).value;
-    return {name:g('.pi-name'), reps:g('.pi-reps'), sets:g('.pi-sets'), weight:g('.pi-weight'), time:g('.pi-time'), notes:g('.pi-notes')};
+    return {name:g('.pi-name'), reps:g('.pi-reps'), sets:g('.pi-sets'), weight:g('.pi-weight'), time:g('.pi-time'), notes:g('.pi-notes'),
+      rest:g('.pi-restv'), warm:el.querySelector('.pi-warmv').checked};
   });
 }
 function dayItemAdd(){ readDayDraft(); dayDraft.items.push(emptyItem()); renderDayEdit(dayDraft.items.length-1); }
@@ -2348,7 +2385,7 @@ function saveDay(){
   if(!p){ closeModal(); return; }
   const name=cleanName(D.name);
   if(!name){ markBad($('#dName'),true); toast('Введите название тренировки'); return; }
-  const LIM=[['.pi-weight','weight'],['.pi-reps','reps'],['.pi-sets','sets'],['.pi-time','time']];
+  const LIM=[['.pi-weight','weight'],['.pi-reps','reps'],['.pi-sets','sets'],['.pi-time','time'],['.pi-restv','rest']];
   const items=[]; let bad=false;
   $$('#dItems .pi').forEach(el=>{
     const g=c=>el.querySelector(c);
@@ -2359,11 +2396,13 @@ function saveDay(){
     LIM.forEach(([c,k])=>{ const b=fieldBad(g(c), LIMITS[k]); markBad(g(c), b); if(b) rowBad=true; });
     markBad(g('.pi-name'), !nm); if(!nm) rowBad=true;
     if(rowBad){ bad=true; return; }
+    const rv=String(g('.pi-restv').value||'').trim();
     items.push({name:nm, reps:num(g('.pi-reps').value), sets:num(g('.pi-sets').value), weight:num(g('.pi-weight').value),
-      time:minOut(g('.pi-time').value), notes:g('.pi-notes').value.trim()});
+      time:minOut(g('.pi-time').value), notes:g('.pi-notes').value.trim(),
+      rest: rv==='' ? null : (num(rv)===null ? 0 : Math.round(num(rv)*60)), warm:g('.pi-warmv').checked});
   });
-  if(bad){ toast('Проверьте выделенные поля: нужно название; вес — до 100 000 кг, повторы и подходы — до 10 000, время — до 6 000 мин', null, null, 5000, 'alert'); return; }
-  const final=items.map(it=>({exId:getOrCreateEx(it.name).id, reps:it.reps, sets:it.sets, weight:it.weight, time:it.time, notes:it.notes}));
+  if(bad){ toast('Проверьте выделенные поля: нужно название; вес — до 100 000 кг, повторы и подходы — до 10 000, время — до 6 000 мин, отдых — до 600 мин', null, null, 5000, 'alert'); return; }
+  const final=items.map(it=>({exId:getOrCreateEx(it.name).id, reps:it.reps, sets:it.sets, weight:it.weight, time:it.time, notes:it.notes, warm:it.warm, rest:it.rest}));
   let target=p.folders.find(f=>f.id===D.folderId) || p.folders[0];
   if(!target){ target={id:nid('prog'), name:'Неделя 1', days:[]}; p.folders.push(target); }
   let day=null;
@@ -2389,14 +2428,16 @@ function planCtx(){
 }
 // какие пункты плана уже сделаны: по числу записей этого упражнения в идущей тренировке
 // выполнение плана по подходам: у пункта «4 подхода» — нужно 4 записанных подхода этого упражнения
+// выполнение плана по подходам. Разминочные пункты закрываются разминочными подходами, рабочие — рабочими.
 function planStatus(x){
-  const w=activeW(), avail=new Map();
-  (w ? recsOfW(w.id) : []).forEach(r=>{ if(!r.warm) avail.set(r.exId, (avail.get(r.exId)||0)+setUnits(r)); });
+  const w=activeW(), pool={work:new Map(), warm:new Map()};
+  (w ? recsOfW(w.id) : []).forEach(r=>{ const m=r.warm?pool.warm:pool.work; m.set(r.exId, (m.get(r.exId)||0)+setUnits(r)); });
   return x.d.items.map(it=>{
+    const m=it.warm?pool.warm:pool.work;
     const need=Math.max(1, Math.round(it.sets||1));
-    const a=avail.get(it.exId)||0, done=Math.min(need, a);
-    avail.set(it.exId, a-done);
-    return {need, done, ok: done>=need};
+    const a=m.get(it.exId)||0, done=Math.min(need, a);
+    m.set(it.exId, a-done);
+    return {need, done, ok: done>=need, warm:!!it.warm};
   });
 }
 function renderPlan(){
@@ -2418,10 +2459,10 @@ function renderPlan(){
     <div class="progress plan-progress"><div style="width:${needAll?Math.round(doneAll/needAll*100):0}%"></div></div>
     ${x.d.items.map((it,i)=>{ const e=exById(it.exId);
       const s=st[i], part=!s.ok && s.done>0;
-      return `<div class="plan-row${s.ok?' done':''}${i===next?' next':''}" data-act="plan-fill" data-i="${i}">
+      return `<div class="plan-row${s.ok?' done':''}${i===next?' next':''}${it.warm?' warm':''}" data-act="plan-fill" data-i="${i}">
         <span class="plan-mark${part?' part':''}">${s.ok?I('check'):part?`${s.done}/${s.need}`:(i+1)}</span>
-        <div class="rec-main"><div class="rec-name">${esc(e?e.name:'?')}</div>
-          <div class="rec-desc">${esc(describe(it))||'—'}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
+        <div class="rec-main"><div class="rec-name">${it.warm?WARM_TAG:''}${esc(e?e.name:'?')}</div>
+          <div class="rec-desc">${planDesc(it)}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
       </div>`; }).join('')}
     ${st.length && next<0 ? `<div class="plan-done">${I('flag')}Все упражнения выполнены</div>` : ''}
   </div>`;
@@ -2470,8 +2511,8 @@ function renderPlanNext(){
   box.innerHTML=`<div class="plan-next" data-act="plan-next" data-i="${next}">
     <span class="plan-mark">${next+1}</span>
     <div class="rec-main"><div class="plan-next-lbl">Следующее по программе${st[next].need>1?` · подход ${st[next].done+1} из ${st[next].need}`:''}</div>
-      <div class="rec-name">${esc(e.name)}</div>
-      <div class="rec-desc">${esc(describe(it))||'—'}</div></div>
+      <div class="rec-name">${it.warm?WARM_TAG:''}${esc(e.name)}</div>
+      <div class="rec-desc">${planDesc(it)}</div></div>
     <span class="plan-next-btn">Подставить</span>
   </div>`;
 }
@@ -2480,7 +2521,7 @@ function fillFromPlan(i, noScroll){
   const it=x.d.items[i]; if(!it) return;
   const e=exById(it.exId);
   exInput.value=e ? e.name : '';
-  lastExKey=normKey(exInput.value); setWarm(false);
+  lastExKey=normKey(exInput.value); setWarm(!!it.warm);
   // подходы записываются по одному: в поле «Подходы» — 1, счётчик «подход k из n» — в подсказке
   setVal('mWeight',it.weight); setVal('mReps',it.reps); setVal('mSets', (it.weight||it.reps) ? 1 : null);
   $('#mTime').value=minIn(it.time);
@@ -2558,7 +2599,7 @@ function saveAddToProg(){
   if(newP){ p.id=nid('prog'); DB.programs.push(p); }
   if(newF){ f.id=nid('prog'); p.folders.push(f); }
   f.days.push({id:nid('prog'), name,
-    items:recsOfW(w.id).filter(isWork).map(r=>({exId:r.exId, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||''}))});
+    items:recsOfW(w.id).map(r=>({exId:r.exId, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||'', warm:!!r.warm, rest:null}))});
   lastProgId=p.id; apState=null;
   save(); closeModal(); refresh();
   const pid=p.id;
@@ -2592,7 +2633,7 @@ function openDataSheet(){
 /* ---- выгрузка ---- */
 function dec(v){ return v==null||v==='' ? '' : String(v).replace('.',','); }
 const EXPORT_HEAD=['Дата','День','Время','Тренировка','Упражнение','Вес, кг','Повторения','Подходы','Тоннаж, кг','Время, мин','Заметки','Разминка','Начало тренировки','Длительность, мин','Отдых, мин'];
-const PROG_HEAD=['Программа','Папка','Тренировка','Упражнение','Вес, кг','Повторения','Подходы','Время, мин','Заметки'];
+const PROG_HEAD=['Программа','Папка','Тренировка','Упражнение','Вес, кг','Повторения','Подходы','Время, мин','Отдых, мин','Разминка','Заметки'];
 
 function recWorkouts(){ return DB.workouts.filter(w=>DB.records.some(r=>r.wId===w.id)).sort((a,b)=>a.start-b.start); }
 
@@ -2622,15 +2663,16 @@ function buildRows(){
 function buildProgramRows(progs){
   const rows=[PROG_HEAD];
   progs.forEach(p=>{
-    if(!p.folders.length){ rows.push([p.name,'','','','','','','','']); return; }
+    const E=n=>Array(n).fill('');
+    if(!p.folders.length){ rows.push([p.name,...E(10)]); return; }
     p.folders.forEach(f=>{
-      if(!f.days.length){ rows.push([p.name,f.name,'','','','','','','']); return; }
+      if(!f.days.length){ rows.push([p.name,f.name,...E(9)]); return; }
       f.days.forEach(d=>{
-        if(!d.items.length){ rows.push([p.name,f.name,d.name,'','','','','','']); return; }
+        if(!d.items.length){ rows.push([p.name,f.name,d.name,...E(8)]); return; }
         d.items.forEach(it=>{
           const e=exById(it.exId);
           rows.push([p.name, f.name, d.name, e?e.name:'?', dec(it.weight), dec(it.reps), dec(it.sets),
-            it.time?dec(round(it.time/60,2)):'', it.notes||'']);
+            it.time?dec(round(it.time/60,2)):'', it.rest===0?'0':(it.rest?dec(round(it.rest/60,2)):''), it.warm?'да':'', it.notes||'']);
         });
       });
     });
@@ -2639,18 +2681,18 @@ function buildProgramRows(progs){
 }
 function templateRows(){
   return [PROG_HEAD,
-    ['Моя программа','Неделя 1','Верх','Жим лёжа','60','10','3','',''],
-    ['','','','Тяга штанги в наклоне','50','10','3','',''],
-    ['','','','Жим гантелей сидя','20','12','3','',''],
-    ['','','Низ','Велосипед','','','','10','разминка'],
-    ['','','','Приседания','80','8','4','',''],
-    ['','','','Румынская тяга','70','10','3','',''],
-    ['','Неделя 2','Верх','Жим лёжа','62,5','10','3','','+2,5 кг'],
-    ['','','','Тяга штанги в наклоне','52,5','10','3','',''],
-    ['','','','Жим гантелей сидя','22','12','3','',''],
-    ['','','Низ','Велосипед','','','','10','разминка'],
-    ['','','','Приседания','85','8','4','',''],
-    ['','','','Румынская тяга','72,5','10','3','','']];
+    ['Моя программа','Неделя 1','Верх','Жим лёжа','60','10','3','','','',''],
+    ['','','','Тяга штанги в наклоне','50','10','3','','','',''],
+    ['','','','Жим гантелей сидя','20','12','3','','','',''],
+    ['','','Низ','Велосипед','','','','10','','','разминка'],
+    ['','','','Приседания','80','8','4','','','',''],
+    ['','','','Румынская тяга','70','10','3','','','',''],
+    ['','Неделя 2','Верх','Жим лёжа','62,5','10','3','','','','+2,5 кг'],
+    ['','','','Тяга штанги в наклоне','52,5','10','3','','','',''],
+    ['','','','Жим гантелей сидя','22','12','3','','','',''],
+    ['','','Низ','Велосипед','','','','10','','','разминка'],
+    ['','','','Приседания','85','8','4','','','',''],
+    ['','','','Румынская тяга','72,5','10','3','','','','']];
 }
 function toDelimited(rows, sep){
   return rows.map(r=>r.map(c=>{
@@ -2697,7 +2739,7 @@ function openProgExport(ids, template){
   const what = template ? 'Пример программы на две недели. Заполните таблицу в Excel / Numbers, сохраните как CSV и загрузите на вкладке «Программы» → «Загрузить».'
     : progs.length===1 ? `Программа «${esc(progs[0].name)}».` : `${progs.length} ${plural(progs.length,'программа','программы','программ')}.`;
   openModal(`<div class="sheet-head"><h2>${title}</h2>${closeX()}</div>
-    <p class="muted">${what} Одна строка — одно упражнение. Колонки: Программа, Папка, Тренировка, Упражнение, Вес, Повторения, Подходы, Время (мин), Заметки. Пустые ячейки в первых трёх колонках берутся из строки выше.</p>
+    <p class="muted">${what} Одна строка — одно упражнение. Колонки: Программа, Папка, Тренировка, Упражнение, Вес, Повторения, Подходы, Время (мин), Отдых (мин; 0 — без отдыха), Разминка («да»), Заметки. Пустые ячейки в первых трёх колонках берутся из строки выше.</p>
     ${exportButtons()}`);
 }
 function exportPayload(){
@@ -3100,6 +3142,8 @@ function progHeadKey(h){
   if(h.startsWith('подход')) return 'sets';
   if(h.startsWith('вес')) return 'weight';
   if(h.startsWith('замет') || h.startsWith('коммент')) return 'notes';
+  if(h.startsWith('отдых')) return 'rest';
+  if(h.startsWith('разминк')) return 'warm';
   return null;
 }
 function parsePrograms(rows){
@@ -3147,7 +3191,10 @@ function parsePrograms(rows){
     if(bad){ errors.push(`Строка ${i+1}: неверное значение (${LIMIT_TEXT[bad]})`); continue; }
     if(time!=null) time=Math.round(unit.time==='s' ? time : time*60);
     const f=getF(p, cur.folder||'Неделя 1'), d=getD(f, cur.day||'Тренировка 1');
-    d.items.push({exName, reps, sets, weight, time, notes:g('notes')});
+    const rs=g('rest').replace(/\s/g,'').replace(',','.'), wv=normKey(g('warm'));
+    let rest=null;
+    if(rs!==''){ const v=Number(rs); if(isFinite(v) && v>=0 && v<=LIMITS.rest*(unit.rest==='s'?60:1)) rest=Math.round(unit.rest==='s'?v:v*60); }
+    d.items.push({exName, reps, sets, weight, time, notes:g('notes'), rest, warm: wv==='да'||wv==='1'||wv==='+'||wv==='yes'});
   }
   return {programs:progs, errors, period:''};
 }
@@ -3163,7 +3210,7 @@ function programFromRecords(rows){
   const folders=[...weeks.keys()].sort((a,b)=>a-b).map((k,wi)=>({
     name:`Неделя ${wi+1}`,
     days:weeks.get(k).map((g,j)=>({name:`Тренировка ${j+1}`,
-      items:g.recs.map(r=>({exName:r.exName, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||''}))}))
+      items:g.recs.map(r=>({exName:r.exName, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||'', warm:!!r.warm}))}))
   }));
   const G=P.groups;
   return {programs: folders.length ? [{name:'', folders}] : [], errors:P.errors,
@@ -3217,7 +3264,7 @@ function applyProgramImport(PP, nameOv, replace){
   PP.programs.forEach(pp=>{
     const name = nameOv || pp.name || `Программа ${fmtDate(Date.now())}`;
     const folders=pp.folders.map(f=>({id:nid('prog'), name:f.name, days:f.days.map(d=>({id:nid('prog'), name:d.name,
-      items:d.items.map(it=>({exId:getOrCreateEx(it.exName).id, reps:it.reps, sets:it.sets, weight:it.weight, time:it.time, notes:it.notes||''}))}))}));
+      items:d.items.map(it=>({exId:getOrCreateEx(it.exName).id, reps:it.reps, sets:it.sets, weight:it.weight, time:it.time, notes:it.notes||'', warm:!!it.warm, rest:it.rest!=null?it.rest:null}))}))}));
     const old = replace ? DB.programs.find(p=>normKey(p.name)===normKey(name)) : null;
     if(old){ old.name=name; old.folders=folders; replaced++; lastId=old.id; }
     else{

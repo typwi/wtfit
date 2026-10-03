@@ -531,3 +531,11 @@ label.auto-rest{display:flex;align-items:center;gap:6px;margin:0;text-transform:
 .brand{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)}
 .brand img{border-radius:10px;flex:none}
 .brand-name{font-size:20px;font-weight:800;letter-spacing:1px;color:#4f8cff}
+
+/* программа: отдых и разминка у пункта */
+.rest-lbl{white-space:nowrap;color:#ffcf80}
+.rest-lbl .i.sm{width:12px;height:12px;margin:0 2px 0 4px;color:var(--warn)}
+.plan-row.warm .plan-mark{background:rgba(255,138,92,.16);color:#ffb08f}
+.pi-row2{display:flex;align-items:flex-end;gap:10px;margin:0 0 8px}
+.pi-rest{flex:0 0 90px}
+label.check.pi-warm{margin:0 0 10px;font-size:14px}
