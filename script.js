@@ -395,6 +395,7 @@ function showView(v){
   $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   curView=v;
   $('#scroller').scrollTop=0;
+  if(typeof updateTopRest==='function') updateTopRest();
 }
 function go(tab){ showView(tab); refresh(); }
 function refresh(){
@@ -701,14 +702,47 @@ function hideRest(){
   clearInterval(rInterval); rInterval=null;
   $('#restBlock').classList.add('hidden');
   $('#restProgress').style.width='0%';
+  updateTopRest('');
   releaseWake();
+}
+/* Отдых в верхней панели: на других вкладках — всегда, на «Записи» — когда блок отдыха уехал под панель */
+function initTopRest(){
+  $$('.topbar').forEach(tb=>{
+    const pill=document.createElement('button');
+    pill.type='button'; pill.className='top-rest hidden'; pill.dataset.act='rest-jump';
+    pill.setAttribute('aria-label','Отдых — перейти к таймеру');
+    pill.innerHTML=I('pause')+'<span class="top-rest-t">00:00</span>';
+    const last=tb.lastElementChild;
+    if(last && last.classList.contains('icon-btn')) tb.insertBefore(pill, last); else tb.appendChild(pill);
+  });
+}
+function restBlockVisible(){
+  if(curView!=='record') return false;
+  const rb=$('#restBlock'), tb=$('#view-record .topbar');
+  if(!rb || rb.classList.contains('hidden') || !tb) return false;
+  return rb.getBoundingClientRect().bottom > tb.getBoundingClientRect().bottom+8;
+}
+let topRestText='';
+function updateTopRest(text){
+  if(text!==undefined) topRestText=text;
+  const show=!!topRestText && !!DB.active.restEnd && !restBlockVisible();
+  $$('.top-rest').forEach(p=>{
+    p.classList.toggle('hidden', !show);
+    if(show) p.querySelector('.top-rest-t').textContent=topRestText;
+  });
+}
+function jumpToRest(){
+  if(curView!=='record') go('record');
+  $('#scroller').scrollTo({top:0, behavior:'smooth'});
 }
 function tickRest(){
   const end=DB.active.restEnd;
   if(!end){ hideRest(); return; }
   const leftMs=end-Date.now();
   if(leftMs<=0){ finishRest(leftMs>-15000); return; }
-  $('#restTime').textContent=fmtClock(Math.ceil(leftMs/1000));
+  const txt=fmtClock(Math.ceil(leftMs/1000));
+  $('#restTime').textContent=txt;
+  updateTopRest(txt);
   const total=(DB.active.restTotal||1)*1000;
   $('#restProgress').style.width=Math.max(0,Math.min(100,(1-leftMs/total)*100))+'%';
 }
@@ -913,6 +947,75 @@ async function requestWake(){
 }
 function releaseWake(){ try{ if(wakeLock) wakeLock.release(); }catch(e){} wakeLock=null; }
 
+/* ================== ПОДСКАЗКИ ЗАМЕТОК ==================
+   Кнопка-лупа рядом с полем «Заметки» включает выпадающий список ранее введённых заметок.
+   Сначала — заметки к этому же упражнению, затем самые частые. Состояние кнопки запоминается. */
+const NOTES_KEY='fitness_notes_suggest';
+let notesOn=false;
+try{ notesOn=localStorage.getItem(NOTES_KEY)==='1'; }catch(e){}
+function notesField(id, value, exRef){
+  return `<label for="${id}">Заметки</label>
+    <div class="note-row">
+      <div class="autocomplete"><input id="${id}" data-notes="1" data-ex="${exRef||''}" value="${esc(value||'')}" placeholder="необязательно" autocomplete="off" autocorrect="off" enterkeyhint="done"><div class="suggest note-suggest"></div></div>
+      <button type="button" class="icon-btn note-toggle${notesOn?' active':''}" data-act="notes-toggle" aria-label="Подсказки заметок">${I('search')}</button>
+    </div>`;
+}
+function noteExName(inp){
+  const ref=inp.dataset.ex && document.getElementById(inp.dataset.ex);
+  if(!ref) return '';
+  if(ref.tagName==='SELECT'){ const e=exById(+ref.value); return e ? e.name : ''; }
+  return ref.value;
+}
+let noteList=[];
+function renderNoteSuggest(inp){
+  const box=inp.parentElement.querySelector('.note-suggest');
+  if(!box) return;
+  if(!notesOn){ box.classList.remove('show'); return; }
+  const q=normKey(inp.value);
+  const ex=exByName(noteExName(inp)), exId=ex ? ex.id : null;
+  const m=new Map();
+  DB.records.forEach(r=>{
+    if(!r.notes) return;
+    const k=normKey(r.notes);
+    let x=m.get(k);
+    if(!x){ x={text:cleanName(r.notes), n:0, nEx:0, last:0}; m.set(k,x); }
+    x.n++; if(r.exId===exId) x.nEx++;
+    if(r.ts>x.last){ x.last=r.ts; x.text=cleanName(r.notes); }
+  });
+  let list=[...m.entries()].filter(([k])=> q ? (k.includes(q) && k!==q) : true).map(([k,x])=>Object.assign({k},x));
+  if(!q && exId) list=list.filter(x=>x.nEx>0);                 // пустое поле — только заметки к этому упражнению
+  list.sort((a,b)=>
+    (q ? (b.k.startsWith(q)-a.k.startsWith(q)) : 0) || (b.nEx-a.nEx) || (b.n-a.n) || (b.last-a.last));
+  noteList=list.slice(0,6).map(x=>x.text);
+  if(!noteList.length){ box.classList.remove('show'); return; }
+  box.innerHTML=noteList.map((t,i)=>`<div class="suggest-item" data-note="${i}"><span>${esc(t)}</span></div>`).join('');
+  box.classList.add('show');
+}
+function hideNoteSuggest(){ $$('.note-suggest').forEach(b=>b.classList.remove('show')); }
+function toggleNotes(){
+  notesOn=!notesOn;
+  try{ localStorage.setItem(NOTES_KEY, notesOn?'1':'0'); }catch(e){}
+  $$('.note-toggle').forEach(b=>b.classList.toggle('active', notesOn));
+  const inp=document.querySelector('input[data-notes]:focus') || (notesOn ? null : null);
+  if(!notesOn) hideNoteSuggest();
+  else if(inp) renderNoteSuggest(inp);
+  toast(notesOn ? 'Подсказки заметок включены' : 'Подсказки заметок выключены', null, null, 1800, notesOn?'search':null);
+}
+document.addEventListener('focusin', e=>{ if(e.target.matches && e.target.matches('input[data-notes]')) renderNoteSuggest(e.target); });
+document.addEventListener('input', e=>{ if(e.target.matches && e.target.matches('input[data-notes]')) renderNoteSuggest(e.target); });
+document.addEventListener('focusout', e=>{ if(e.target.matches && e.target.matches('input[data-notes]')) setTimeout(hideNoteSuggest, 250); });
+document.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && e.target.matches && e.target.matches('input[data-notes]')){ e.preventDefault(); hideNoteSuggest(); e.target.blur(); }
+});
+document.addEventListener('mousedown', e=>{ if(e.target.closest('.note-suggest, .note-toggle')) e.preventDefault(); });
+document.addEventListener('click', e=>{
+  const it=e.target.closest('.note-suggest .suggest-item');
+  if(!it) return;
+  const inp=it.closest('.autocomplete').querySelector('input[data-notes]');
+  const t=noteList[+it.dataset.note];
+  if(inp && t!=null){ inp.value=t; hideNoteSuggest(); inp.blur(); }
+});
+
 /* ================== РЕДАКТИРОВАНИЕ ЗАПИСИ ================== */
 function openRecEdit(id, fromW){
   const r=DB.records.find(x=>x.id===id);
@@ -932,8 +1035,7 @@ function openRecEdit(id, fromW){
       <div><label for="eSets">Подходы</label><input id="eSets" inputmode="decimal" value="${esc(inVal(r.sets))}" placeholder="0"></div>
       <div><label for="eTime">Время (мин)</label><input id="eTime" inputmode="decimal" value="${esc(minIn(r.time))}" placeholder="0"></div>
     </div>
-    <label for="eNotes">Заметки</label>
-    <input id="eNotes" value="${esc(r.notes||'')}" placeholder="необязательно">
+    ${notesField('eNotes', r.notes||'', 'eEx')}
     <button class="btn big" style="margin-top:16px" data-act="rec-save" data-id="${r.id}">Сохранить</button>
     <div class="grid2" style="margin-top:10px">
       <button class="btn ghost" data-act="rec-toform" data-id="${r.id}">${I('repeat')}Повторить</button>
@@ -1211,13 +1313,68 @@ function openWorkout(id){
     </div>`;
   }).join('');
   if(!recs.length) html+='<div class="empty">Записей пока нет</div>';
-  if(recs.length) html+=`<button class="btn ghost big" style="margin-top:16px" data-act="w-toprog" data-id="${w.id}">${I('clip')}Добавить в программу</button>`;
-  html+=`<div class="grid2" style="margin-top:${recs.length?10:16}px">
+  else html+=`<p class="muted" style="margin:10px 2px 0">Нажмите на запись, чтобы исправить вес, повторы, время или удалить её.</p>`;
+  html+=`<button class="btn big" style="margin-top:14px" data-act="w-addrec" data-id="${w.id}">${I('plus')}Добавить упражнение</button>`;
+  if(recs.length) html+=`<button class="btn ghost big" data-act="w-toprog" data-id="${w.id}">${I('clip')}Добавить в программу</button>`;
+  html+=`<div class="grid2" style="margin-top:10px">
     ${isActive(w)?'<button class="btn ghost" data-act="close-modal">Закрыть</button>':`<button class="btn ghost" data-act="w-edit" data-id="${w.id}">${I('edit')}Дата и время</button>`}
     <button class="btn danger" data-act="w-del" data-id="${w.id}">${I('trash')}Удалить</button>
   </div>`;
   openModal(html);
 }
+// добавить в тренировку забытое упражнение
+function openRecAdd(wId){
+  const w=wById(wId);
+  if(!w){ closeModal(); return; }
+  const recs=recsOfW(wId);
+  let ts = isActive(w) ? Date.now() : (recs.length ? recs[recs.length-1].ts+60000 : w.start);
+  if(!isActive(w) && w.timed && w.end) ts=Math.min(ts, w.end);
+  const dl=DB.exercises.slice().sort((a,b)=>a.name.localeCompare(b.name,'ru')).map(e=>`<option value="${esc(e.name)}"></option>`).join('');
+  openModal(`<div class="sheet-head"><h2>Добавить в тренировку #${workoutNumber(wId)}</h2>
+      <button class="icon-btn" data-act="w-open" data-id="${wId}" aria-label="Назад">${I('x')}</button></div>
+    <label for="eExName">Упражнение</label>
+    <input id="eExName" list="exDL2" placeholder="Начните вводить..." autocomplete="off" autocapitalize="sentences">
+    <datalist id="exDL2">${dl}</datalist>
+    <label for="eTs">Дата и время</label>
+    <input id="eTs" type="datetime-local" value="${toInputDT(ts)}">
+    <div class="grid2">
+      <div><label for="eWeight">Вес (кг)</label><input id="eWeight" inputmode="decimal" placeholder="0"></div>
+      <div><label for="eReps">Повторения</label><input id="eReps" inputmode="decimal" placeholder="0"></div>
+    </div>
+    <div class="grid2">
+      <div><label for="eSets">Подходы</label><input id="eSets" inputmode="decimal" placeholder="0"></div>
+      <div><label for="eTime">Время (мин)</label><input id="eTime" inputmode="decimal" placeholder="0"></div>
+    </div>
+    ${notesField('eNotes','','eExName')}
+    <div class="grid2" style="margin-top:16px">
+      <button class="btn ghost" data-act="w-open" data-id="${wId}">Отмена</button>
+      <button class="btn ok" data-act="w-addrec-save" data-id="${wId}">${I('save')}Добавить</button>
+    </div>`);
+  $('#eExName').focus();
+}
+function saveRecAdd(wId){
+  const w=wById(wId);
+  if(!w){ closeModal(); return; }
+  const nameInp=$('#eExName'), name=cleanName(nameInp.value);
+  if(!name){ markBad(nameInp,true); toast('Введите название упражнения'); nameInp.focus(); return; }
+  const ts=fromInputDT($('#eTs').value);
+  if(!ts){ toast('Укажите дату и время'); return; }
+  if(!checkLimits([['eWeight','weight'],['eReps','reps'],['eSets','sets'],['eTime','time']])) return;
+  const vals={weight:num($('#eWeight').value), reps:num($('#eReps').value), sets:num($('#eSets').value),
+    time:minOut($('#eTime').value), notes:$('#eNotes').value.trim()};
+  if(!vals.reps && !vals.sets && !vals.weight && !vals.time && !vals.notes){ toast('Заполните хотя бы одно поле'); return; }
+  const ex=getOrCreateEx(name);
+  DB.records.push(Object.assign({id:nid('rec'), exId:ex.id, wId:w.id, ts}, vals));
+  // время записи за пределами замеренной тренировки — расширяем её границы
+  if(!isActive(w) && w.timed && w.end){
+    if(ts<w.start) w.start=ts;
+    if(ts>w.end) w.end=ts;
+  }
+  cleanupWorkouts(); save();
+  openWorkout(w.id); refresh();
+  toast(`Добавлено: ${ex.name}`, null, null, null, 'check');
+}
+
 function openWorkoutEdit(id){
   const w=wById(id);
   if(!w || isActive(w)) return;
@@ -1997,6 +2154,10 @@ function toDelimited(rows, sep){
   return rows.map(r=>r.map(c=>{
     let s=String(c==null?'':c);
     if(sep==='\t') s=s.replace(/[\t\r\n]+/g,' ');
+    else s=s.replace(/\r\n?|\n/g,' ');
+    // текст, начинающийся с = + - @ (например, заметка «+2,5 кг»), Excel принял бы за формулу —
+    // ставим впереди пробел: в таблице это обычный текст, при загрузке обратно пробел отбрасывается
+    if(/^[=+\-@]/.test(s) && !/^[-+]?\d+([.,]\d+)?$/.test(s)) s=' '+s;
     if(s.includes(sep) || /["\r\n]/.test(s) || /^\s|\s$/.test(s)) s='"'+s.replace(/"/g,'""')+'"';
     return s;
   }).join(sep)).join('\r\n');
@@ -2651,6 +2812,10 @@ document.addEventListener('click', e=>{
     case 'rest-custom-start':customRestStart(); break;
     case 'rest-cancel':      cancelRest(); toast('Отдых остановлен'); break;
     case 'rest-add':         addRest(30); break;
+    case 'rest-jump':        jumpToRest(); break;
+    case 'notes-toggle':     toggleNotes(); break;
+    case 'w-addrec':         openRecAdd(id); break;
+    case 'w-addrec-save':    saveRecAdd(id); break;
     case 'rec-edit':         openRecEdit(id, el.dataset.w ? +el.dataset.w : null); break;
     case 'rec-save':         saveRecEdit(id); break;
     case 'rec-del':          deleteRec(id); break;
@@ -2810,6 +2975,9 @@ if('serviceWorker' in navigator && location.protocol==='https:'){
 }
 
 /* ================== СТАРТ ================== */
+initTopRest();
+$$('.note-toggle').forEach(b=>b.classList.toggle('active', notesOn));
+$('#scroller').addEventListener('scroll', ()=>{ if(DB.active.restEnd) updateTopRest(); }, {passive:true});
 askPersist();
 fixOrphans();
 fixProgramRefs();

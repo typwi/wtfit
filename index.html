@@ -46,6 +46,7 @@
   <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M8 3.5v5h7v-5M8 20.5v-6h8v6"/></symbol>
   <symbol id="i-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4.5" width="14" height="16.5" rx="2"/><path d="M9 3h6v3H9zM8.5 11h7M8.5 14.5h7M8.5 18h4"/></symbol>
   <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></symbol>
 </svg>
 
@@ -136,7 +137,10 @@
       </div>
 
       <label for="mNotes">Заметки</label>
-      <input id="mNotes" placeholder="необязательно" autocomplete="off">
+      <div class="note-row">
+        <div class="autocomplete"><input id="mNotes" data-notes="1" data-ex="exInput" placeholder="необязательно" autocomplete="off" autocorrect="off" enterkeyhint="done"><div class="suggest note-suggest"></div></div>
+        <button type="button" class="icon-btn note-toggle" data-act="notes-toggle" aria-label="Подсказки заметок"><svg class="i ic-search" aria-hidden="true"><use href="#i-search"></use></svg></button>
+      </div>
 
       <div class="form-actions">
         <button class="btn ghost" data-act="clear-form">Очистить</button>

@@ -417,3 +417,20 @@ input[type=date]{min-height:48px;display:block;text-align:left}
 label.pi-l{margin:0;text-transform:none;letter-spacing:0;font-size:11px;font-weight:600;text-align:center}
 .pi-l input{margin-top:3px;padding:9px 4px;text-align:center;background:var(--card)}
 .pi-notes{background:var(--card);padding:9px 12px}
+
+/* отдых в верхней панели */
+.top-rest{flex:none;display:flex;align-items:center;gap:5px;cursor:pointer;
+  background:rgba(255,176,32,.14);border:1px solid rgba(255,176,32,.45);color:#ffb020;
+  border-radius:16px;padding:5px 11px 5px 8px;font-size:15px;font-weight:700;font-family:inherit;
+  font-variant-numeric:tabular-nums}
+.top-rest:active{opacity:.6}
+.top-rest .i{width:16px;height:16px;color:#ffb020}
+
+/* заметки с подсказками */
+.note-row{display:flex;gap:8px;align-items:stretch}
+.note-row .autocomplete{flex:1;min-width:0}
+.icon-btn.note-toggle{width:46px;height:auto;min-height:46px;border-radius:10px;background:var(--card2);border:1px solid var(--border)}
+.note-toggle .i{color:var(--muted)}
+.note-toggle.active{background:rgba(79,140,255,.16);border-color:var(--accent)}
+.note-toggle.active .i{color:var(--accent)}
+.ic-search{color:var(--accent)}
