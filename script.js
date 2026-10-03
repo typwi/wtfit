@@ -2573,6 +2573,10 @@ function startPlan(dayId){
   DB.active.plan={dayId};
   const w=activeW();
   if(w){ w.plan=`${x.f.name} · ${x.d.name}`; w.planDay=x.d.id; }
+  // тренировка по программе: автоподстановка и автоотдых — «по программе»
+  autoSrc='plan'; arMode='plan';
+  try{ localStorage.setItem(AUTOFILL_KEY, 'plan'); localStorage.setItem(AUTOREST_KEY, 'plan'); }catch(e){}
+  renderRestPresets();
   save(); closeModal(); go('record');
   toast(`Тренировка «${x.d.name}» началась`, null, null, null, 'play');
 }
