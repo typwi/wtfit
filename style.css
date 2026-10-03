@@ -434,3 +434,49 @@ label.pi-l{margin:0;text-transform:none;letter-spacing:0;font-size:11px;font-wei
 .note-toggle.active{background:rgba(79,140,255,.16);border-color:var(--accent)}
 .note-toggle.active .i{color:var(--accent)}
 .ic-search{color:var(--accent)}
+
+/* «Прошлый раз»: подходы прошлой тренировки */
+.hint-card{align-items:flex-start}
+.hint-main{flex:1;min-width:0}
+.hint-sets{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 4px}
+.hs{font-size:13px;font-weight:600;padding:3px 7px;border-radius:6px;background:var(--card2);color:var(--txt);font-variant-numeric:tabular-nums}
+.hs.done{background:rgba(55,194,110,.16);color:var(--ok)}
+.hs.next{box-shadow:inset 0 0 0 1px var(--accent);color:#9ec4ff}
+.hint-today{color:var(--txt)}
+.hint-plan{font-size:13px;color:#f06292;margin:4px 0 2px;font-weight:600}
+.hint-plan b{color:var(--txt)}
+.hint-pr{margin-top:3px}
+.hint-card .btn{margin-top:2px}
+
+/* отдых перед подходом */
+.gap{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.gap .i.sm{width:12px;height:12px;margin-right:2px;color:var(--warn);opacity:.8}
+.set-line .gap{margin-left:8px}
+.gap.blk{display:block;margin-top:2px}
+
+/* план: частично выполненный пункт */
+.plan-mark.part{font-size:10px;letter-spacing:-.3px;background:rgba(79,140,255,.2);color:#9ec4ff}
+
+/* рекорды по весам */
+.pr-row{display:grid;grid-template-columns:64px 1fr auto auto;gap:10px;align-items:baseline;padding:10px 14px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+.pr-row:last-child{border-bottom:none}
+.pr-w{font-weight:700}
+.pr-r{font-weight:600}
+.pr-e,.pr-d{font-size:12px}
+
+/* тоннаж по неделям */
+.wk-card{padding:12px 14px}
+.wk-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.wk-title{font-weight:700;font-size:15px}
+.wk-head b{color:var(--txt)}
+.wk-svg{width:100%;height:100px;display:block}
+.wk-bar{cursor:pointer}
+.wk-bar path{fill:#4f8cff;opacity:.45;transition:opacity .15s}
+.wk-bar.sel path{opacity:1}
+.wk-zero{fill:var(--border)}
+.wk-labels{display:grid;grid-template-columns:repeat(12,1fr);font-size:10px;color:var(--muted);margin-top:4px;text-align:center;font-variant-numeric:tabular-nums}
+.wk-labels span{white-space:nowrap;overflow:visible}
+
+/* замеры */
+.m-val{flex:none;font-weight:700;font-variant-numeric:tabular-nums}
+.m-delta{margin-left:6px;color:var(--muted)}

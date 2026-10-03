@@ -110,7 +110,8 @@ function fromInputDT(s){
 function emptyDB(){
   return {
     v:4, exercises:[], records:[], workouts:[], programs:[],
-    seq:{ex:0, rec:0, w:0, prog:0},
+    measures:[], mkinds:[],
+    seq:{ex:0, rec:0, w:0, prog:0, m:0},
     active:{wId:null, restEnd:null, restTotal:0, plan:null},
     lastExport:0
   };
@@ -150,6 +151,12 @@ function normalize(d){
       .filter(w=>w && w.start)
       .map(w=>({id:+w.id, start:+w.start, end:w.end?+w.end:null, timed:!!w.timed, rest:Math.max(0,+w.rest||0), plan:w.plan?String(w.plan):''})),
     programs: normPrograms(d.programs),
+    measures: (Array.isArray(d.measures)?d.measures:[])
+      .filter(m=>m && m.k && m.ts && num(m.v))
+      .map(m=>({id:+m.id, k:String(m.k), ts:+m.ts, v:num(m.v)})),
+    mkinds: (Array.isArray(d.mkinds)?d.mkinds:[])
+      .filter(k=>k && k.k && cleanName(k.name))
+      .map(k=>({k:String(k.k), name:cleanName(k.name), unit:cleanName(k.unit||'см')})),
     seq: Object.assign({}, base.seq, d.seq||{}),
     active: Object.assign({}, base.active, d.active||{}),
     lastExport: +d.lastExport || 0
@@ -158,6 +165,7 @@ function normalize(d){
   out.seq.ex  = Math.max(+out.seq.ex||0,  maxId(out.exercises));
   out.seq.rec = Math.max(+out.seq.rec||0, maxId(out.records));
   out.seq.w   = Math.max(+out.seq.w||0,   maxId(out.workouts));
+  out.seq.m   = Math.max(+out.seq.m||0,   maxId(out.measures), ...out.mkinds.map(k=>+String(k.k).replace(/\D/g,'')||0));
   let maxP=0;
   out.programs.forEach(p=>{ maxP=Math.max(maxP,p.id); p.folders.forEach(f=>{ maxP=Math.max(maxP,f.id); f.days.forEach(x=>{ maxP=Math.max(maxP,x.id); }); }); });
   out.seq.prog = Math.max(+out.seq.prog||0, maxP);
@@ -312,6 +320,78 @@ function describe(r){
   if(r.time) p.push(fmtDur(r.time));
   return p.join(' · ');
 }
+/* ---- подходы, прошлая тренировка, рекорды, отдых ---- */
+function setUnits(r){ return Math.max(1, Math.round(r.sets||1)); }
+// один подход коротко: «60×12», «12 повт», «60 кг», «15 мин»
+function setLabel(r){
+  if(r.weight && r.reps) return `${fmtNum(r.weight)}×${fmtNum(r.reps)}`;
+  if(r.weight) return `${fmtNum(r.weight)} кг`;
+  if(r.reps) return `${fmtNum(r.reps)} повт`;
+  if(r.time) return fmtDur(r.time);
+  return '—';
+}
+// запись «60×12, 3 подхода» → три отдельных подхода
+function expandSets(recs){
+  const out=[];
+  recs.forEach(r=>{ for(let i=0;i<setUnits(r) && out.length<60;i++) out.push(r); });
+  return out;
+}
+// тренировки, где было упражнение: [{wId, recs}] — от последней к первой
+function exSessions(exId){
+  const m=new Map();
+  DB.records.forEach(r=>{ if(r.exId!==exId) return; if(!m.has(r.wId)) m.set(r.wId,[]); m.get(r.wId).push(r); });
+  const arr=[...m.entries()].map(([wId,rs])=>({wId, recs:rs.sort((a,b)=>a.ts-b.ts)}));
+  arr.sort((a,b)=>b.recs[b.recs.length-1].ts-a.recs[a.recs.length-1].ts);
+  return arr;
+}
+// «текущая» тренировка для упражнения: идущая, иначе сегодняшняя
+function curSessionW(exId){
+  if(DB.active.wId) return DB.active.wId;
+  const r=lastRecOf(exId);
+  return (r && dayKey(r.ts)===dayKey(Date.now())) ? r.wId : null;
+}
+// расчётный максимум на 1 повторение (формула Эпли)
+function e1rm(w, reps){
+  if(!w || !reps) return 0;
+  return reps===1 ? w : w*(1+reps/30);
+}
+// рекорды упражнения: макс. вес, лучший 1ПМ, лучший результат на каждом весе
+function exPR(exId, exceptId){
+  const byW=new Map();
+  let maxW=0, e1=0, e1Any=0;
+  DB.records.forEach(r=>{
+    if(r.exId!==exId || r.id===exceptId) return;
+    if(r.weight && r.weight>maxW) maxW=r.weight;
+    if(r.weight && r.reps){
+      const b=byW.get(r.weight);
+      if(!b || r.reps>b.reps || (r.reps===b.reps && r.ts<b.ts)) byW.set(r.weight, {reps:r.reps, ts:r.ts, id:r.id});
+      const v=e1rm(r.weight, r.reps);
+      if(r.reps<=12 && v>e1) e1=v;
+      if(v>e1Any) e1Any=v;
+    }
+  });
+  return {maxW, e1: e1||e1Any, byW};
+}
+// отдых перед каждой записью = время от предыдущей записи в той же тренировке
+function buildGaps(){
+  const by=new Map(), gaps=new Map();
+  DB.records.forEach(r=>{ if(!by.has(r.wId)) by.set(r.wId,[]); by.get(r.wId).push(r); });
+  by.forEach(rs=>{
+    rs.sort((a,b)=>a.ts-b.ts);
+    for(let i=1;i<rs.length;i++) gaps.set(rs[i].id, rs[i].ts-rs[i-1].ts);
+  });
+  return gaps;
+}
+function fmtGap(ms){
+  if(ms==null) return '';
+  const sec=Math.round(ms/1000);
+  return sec<3600 ? fmtClock(sec) : fmtDur(sec);
+}
+function gapHtml(gaps, r, cls){
+  const g=gaps.get(r.id);
+  return g!=null ? `<span class="gap${cls?' '+cls:''}">${I('pause','sm')}${fmtGap(g)}</span>` : '';
+}
+
 function rxs(r){
   if(r.reps && r.sets) return `${fmtNum(r.reps)}×${fmtNum(r.sets)}`;
   if(r.reps) return fmtNum(r.reps);
@@ -447,6 +527,7 @@ function renderSuggest(){
 function hideSuggest(){ exSuggest.classList.remove('show'); }
 
 exInput.addEventListener('input', ()=>{ renderSuggest(); renderLastHint(); renderPlanNext(); });
+$('#mWeight').addEventListener('input', ()=>renderLastHint());
 exInput.addEventListener('focus', renderSuggest);
 exInput.addEventListener('blur', ()=>setTimeout(hideSuggest,250));
 exInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); hideSuggest(); exInput.blur(); } });
@@ -464,10 +545,16 @@ exSuggest.addEventListener('click', e=>{
 function formEmpty(){ return NUM_FIELDS.every(id=>!$('#'+id).value.trim()); }
 function setVal(id,v){ $('#'+id).value=inVal(v); }
 function fillFromLast(){
-  const ex=exByName(exInput.value);
-  const r=ex && lastRecOf(ex.id);
-  if(!r) return;
-  setVal('mReps',r.reps); setVal('mSets',r.sets); setVal('mWeight',r.weight); $('#mTime').value=minIn(r.time);
+  const ex=exByName(exInput.value); if(!ex) return;
+  const cur=curSessionW(ex.id), sess=exSessions(ex.id);
+  const prev=sess.find(x=>x.wId!==cur); if(!prev) return;
+  const today=sess.find(x=>x.wId===cur);
+  const sets=expandSets(prev.recs);
+  const done=today ? expandSets(today.recs).length : 0;
+  const r=sets[Math.min(done, sets.length-1)];       // следующий по счёту подход прошлой тренировки
+  setVal('mWeight',r.weight); setVal('mReps',r.reps); setVal('mSets',r.sets); $('#mTime').value=minIn(r.time);
+  NUM_FIELDS.forEach(id=>markBad($('#'+id),false));
+  renderLastHint();
 }
 function clearForm(withName){
   NUM_FIELDS.forEach(id=>$('#'+id).value='');
@@ -519,36 +606,48 @@ function stepInput(id, d){
   if(max && v>max) v=max;
   inp.value=v ? inVal(v) : '';
   markBad(inp,false);
+  if(id==='mWeight') renderLastHint();
 }
 
 function renderLastHint(){
   const box=$('#lastHint');
   const ex=exByName(exInput.value);
-  const r=ex && lastRecOf(ex.id);
-  if(!r){
-    // упражнение есть (например, из программы), но его ещё ни разу не записывали
-    box.innerHTML = ex ? `<div class="hint-card"><div class="muted">Прошлый раз · записей по «${esc(ex.name)}» ещё нет</div></div>` : '';
+  if(!ex){ box.innerHTML=''; return; }
+  const cur=curSessionW(ex.id), sess=exSessions(ex.id);
+  const prev=sess.find(x=>x.wId!==cur), today=sess.find(x=>x.wId===cur);
+  const done=today ? expandSets(today.recs).length : 0;
+  const pl=planLineFor(ex.id);
+  if(!prev && !today && !pl){
+    box.innerHTML=`<div class="hint-card"><div class="muted">Прошлый раз · записей по «${esc(ex.name)}» ещё нет</div></div>`;
     return;
   }
-  const maxW=DB.records.reduce((m,x)=>x.exId===ex.id && x.weight>m ? x.weight : m, 0);
-  box.innerHTML=`<div class="hint-card">
-    <div>
-      <div class="muted">Прошлый раз · ${relDay(r.ts)} ${fmtTime(r.ts)}</div>
-      <div class="hint-val">${esc(describe(r))||'—'}</div>
-      ${maxW?`<div class="muted">Рекорд: ${fmtNum(maxW)} кг</div>`:''}
-    </div>
-    <button class="btn ghost sm" data-act="fill-last">Подставить</button>
-  </div>`;
+  let html='<div class="hint-card"><div class="hint-main">';
+  if(prev){
+    const sets=expandSets(prev.recs);
+    html+=`<div class="muted">Прошлый раз · ${relDay(prev.recs[0].ts)}${cur?` · сегодня: <b class="hint-today">${done} из ${sets.length}</b>`:''}</div>
+      <div class="hint-sets">${sets.map((r,i)=>`<span class="hs${i<done?' done':''}${cur && i===done?' next':''}">${esc(setLabel(r))}</span>`).join('')}</div>`;
+  } else if(today){
+    html+=`<div class="muted">Раньше не делали · сегодня: <b class="hint-today">${done} ${plural(done,'подход','подхода','подходов')}</b></div>`;
+  }
+  if(pl) html+=`<div class="hint-plan">${I('clip','sm')}${pl}</div>`;
+  const pr=exPR(ex.id), wv=num($('#mWeight').value), parts=[];
+  if(pr.maxW) parts.push(`макс ${fmtNum(pr.maxW)} кг`);
+  if(pr.e1) parts.push(`1ПМ ≈ ${fmtNum(round(pr.e1,1))} кг`);
+  if(wv && pr.byW.has(wv)) parts.push(`на ${fmtNum(wv)} кг — ${fmtNum(pr.byW.get(wv).reps)} повт`);
+  if(parts.length) html+=`<div class="muted hint-pr">${I('trophy','sm')}${parts.join(' · ')}</div>`;
+  html+='</div>';
+  if(prev) html+=`<button class="btn ghost sm" data-act="fill-last">Подставить</button>`;
+  box.innerHTML=html+'</div>';
 }
 
-function recRow(r, fromW){
+function recRow(r, fromW, gaps){
   const ex=exById(r.exId);
   return `<div class="rec-row" data-act="rec-edit" data-id="${r.id}"${fromW?` data-w="${fromW}"`:''}>
     <div class="rec-main">
       <div class="rec-name">${esc(ex?ex.name:'?')}</div>
       <div class="rec-desc">${esc(describe(r))}${r.notes?` <span class="note">«${esc(r.notes)}»</span>`:''}</div>
     </div>
-    <div class="rec-side">${fmtTime(r.ts)}</div>
+    <div class="rec-side">${fmtTime(r.ts)}${gaps?gapHtml(gaps,r,'blk'):''}</div>
   </div>`;
 }
 
@@ -560,7 +659,7 @@ function renderToday(){
   const total=recs.reduce((a,r)=>a+ton(r),0);
   box.innerHTML=`<div class="section-head"><span>Сегодня</span>
       <span class="muted">${recs.length} ${plural(recs.length,'запись','записи','записей')}${total?' · '+fmtTon(total):''}</span></div>
-    <div class="card list-card">${recs.map(r=>recRow(r)).join('')}</div>`;
+    <div class="card list-card">${(gs=>recs.map(r=>recRow(r,null,gs)).join(''))(buildGaps())}</div>`;
 }
 
 let saveGuard=0;
@@ -582,20 +681,27 @@ function saveRecord(){
   const ts=Date.now();
   const wId=DB.active.wId || workoutFor(ts);
   const rec={id:nid('rec'), exId:ex.id, wId, ts, reps, sets, weight, time, notes};
+  const before=createdEx ? null : exPR(ex.id);
   DB.records.push(rec);
   save();
+  let prMsg='';
+  if(before && weight){
+    if(before.maxW && weight>before.maxW) prMsg=`Новый рекорд веса: ${fmtNum(weight)} кг!`;
+    else if(reps && before.byW.has(weight) && reps>before.byW.get(weight).reps) prMsg=`Рекорд на ${fmtNum(weight)} кг: ${fmtNum(reps)} повт!`;
+    else if(reps && before.e1 && e1rm(weight,reps)>before.e1+0.05 && reps<=12) prMsg=`Новый 1ПМ ≈ ${fmtNum(round(e1rm(weight,reps),1))} кг!`;
+  }
 
   $('#mNotes').value='';
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   try{ navigator.vibrate && navigator.vibrate(30); }catch(e){}
   renderRecord();
 
-  toast('Сохранено', 'Отменить', ()=>{
+  toast(prMsg||'Сохранено', 'Отменить', ()=>{
     DB.records=DB.records.filter(r=>r.id!==rec.id);
     if(createdEx && !DB.records.some(r=>r.exId===ex.id)) DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
     cleanupWorkouts(); save(); refresh();
     toast('Запись отменена');
-  }, null, 'check');
+  }, prMsg?5000:null, prMsg?'trophy':'check');
 }
 
 /* ================== ТАЙМЕР ТРЕНИРОВКИ ================== */
@@ -1151,15 +1257,27 @@ function renderHistory(){
   if(!recs.length){ box.innerHTML=`<div class="empty">Записей пока нет<br><br><button class="btn" data-act="ex-record">${I('pen')}Записать подход</button></div>`; return; }
 
   const maxW=recs.reduce((m,r)=>Math.max(m,r.weight||0),0);
-  const maxT=recs.reduce((m,r)=>Math.max(m,ton(r)),0);
   const maxR=recs.reduce((m,r)=>Math.max(m,r.reps||0),0);
+  const pr=exPR(ex.id), nSets=expandSets(recs).length, nW=new Set(recs.map(r=>r.wId)).size;
+  const gaps=buildGaps();
   let html=`<div class="stats-summary">
-    <div class="stats-box"><div class="lbl">Записей</div><div class="val">${recs.length}</div></div>
+    <div class="stats-box"><div class="lbl">Тренировок</div><div class="val">${nW}</div></div>
+    <div class="stats-box"><div class="lbl">Подходов</div><div class="val">${nSets}</div></div>
     <div class="stats-box"><div class="lbl">${I('trophy','sm')}Макс. вес</div><div class="val">${maxW?fmtNum(maxW)+' кг':'—'}</div></div>
-    <div class="stats-box"><div class="lbl">${I('dumbbell','sm')}Лучший тоннаж</div><div class="val">${maxT?fmtTon(maxT):'—'}</div></div>
-    <div class="stats-box"><div class="lbl">Макс. повторов</div><div class="val">${maxR?fmtNum(maxR):'—'}</div></div>
+    <div class="stats-box"><div class="lbl">${I('trophy','sm')}1ПМ (расчёт)</div><div class="val">${pr.e1?'≈ '+fmtNum(round(pr.e1,1))+' кг':(maxR?fmtNum(maxR)+' повт':'—')}</div></div>
   </div>`;
   html+=sparkline(recs);
+  if(pr.byW.size){
+    const rows=[...pr.byW.entries()].sort((a,b)=>b[0]-a[0]).slice(0,12);
+    html+=`<div class="section-head"><span>Рекорды по весам</span><span class="muted">лучший результат</span></div>
+      <div class="card list-card">${rows.map(([w,b])=>`<div class="pr-row">
+        <span class="pr-w">${fmtNum(w)} кг</span>
+        <span class="pr-r">${fmtNum(b.reps)} ${plural(Math.round(b.reps),'повтор','повтора','повторов')}</span>
+        <span class="pr-e muted">1ПМ ≈ ${fmtNum(round(e1rm(w,b.reps),1))}</span>
+        <span class="pr-d muted">${fmtDM(b.ts)}</span></div>`).join('')}</div>
+      <p class="muted" style="margin:6px 2px 4px">1ПМ — расчётный максимум на одно повторение (формула Эпли). Точнее всего при 1–12 повторах.</p>`;
+  }
+  html+=`<div class="section-head"><span>История</span></div>`;
 
   html+='<div class="card list-card">';
   let lastDay='';
@@ -1171,13 +1289,13 @@ function renderHistory(){
       lastDay=dk;
     }
     const t=ton(r);
-    const pr=maxW && r.weight===maxW;
+    const best=r.weight && pr.byW.has(r.weight) && pr.byW.get(r.weight).id===r.id;
     html+=`<div class="rec-row" data-act="rec-edit" data-id="${r.id}">
       <div class="rec-main">
-        <div class="rec-name">${esc(describe(r))||'—'}${pr?' '+I('trophy','pr'):''}</div>
+        <div class="rec-name">${esc(describe(r))||'—'}${best?' '+I('trophy','pr'):''}</div>
         <div class="rec-desc">${t?'тоннаж '+fmtTon(t):''}${r.notes?` <span class="note">«${esc(r.notes)}»</span>`:''}</div>
       </div>
-      <div class="rec-side">${fmtTime(r.ts)}</div>
+      <div class="rec-side">${fmtTime(r.ts)}${gapHtml(gaps,r,'blk')}</div>
     </div>`;
   });
   html+='</div>';
@@ -1186,13 +1304,15 @@ function renderHistory(){
 
 // мини-график прогресса по дням (макс. вес, иначе повторы/время)
 function sparkline(recs){
-  const metric = recs.some(r=>r.weight) ? ['weight','Макс. вес по дням, кг']
+  const metric = recs.some(r=>r.weight && r.reps) ? ['e1','Расчётный 1ПМ по дням, кг']
+               : recs.some(r=>r.weight) ? ['weight','Макс. вес по дням, кг']
                : recs.some(r=>r.reps)   ? ['reps','Макс. повторов по дням']
                : recs.some(r=>r.time)   ? ['time','Макс. время по дням, мин'] : null;
   if(!metric) return '';
   const byDay=new Map();
   recs.forEach(r=>{
-    let v=r[metric[0]]; if(!v) return; if(metric[0]==='time') v=round(v/60,2);
+    let v = metric[0]==='e1' ? round(e1rm(r.weight,r.reps),1) : r[metric[0]];
+    if(!v) return; if(metric[0]==='time') v=round(v/60,2);
     const k=dayKey(r.ts);
     byDay.set(k, Math.max(byDay.get(k)||0, v));
   });
@@ -1294,6 +1414,7 @@ function openWorkout(id){
   const d=new Date(w.start);
   const order=[], by=new Map();
   recs.forEach(r=>{ if(!by.has(r.exId)){ by.set(r.exId,[]); order.push(r.exId); } by.get(r.exId).push(r); });
+  const gaps=buildGaps();
 
   let html=`<div class="sheet-head"><h2>Тренировка #${workoutNumber(id)}</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
     <div class="muted" style="margin-bottom:${w.plan?4:12}px">${WD[d.getDay()]}, ${fmtDate(w.start)} · ${fmtTime(w.start)}${isActive(w)?' · <span class="badge">идёт</span>':''}</div>
@@ -1309,11 +1430,11 @@ function openWorkout(id){
     const tt=rs.reduce((a,r)=>a+ton(r),0);
     return `<div class="ex-block">
       <div class="ex-block-title"><span>${esc(ex?ex.name:'?')}</span><span class="muted">${tt?fmtTon(tt):''}</span></div>
-      ${rs.map(r=>`<div class="set-line" data-act="rec-edit" data-id="${r.id}" data-w="${w.id}"><span class="num">${fmtTime(r.ts)}</span>${esc(describe(r))||'—'}${r.notes?`<span class="note">«${esc(r.notes)}»</span>`:''}</div>`).join('')}
+      ${rs.map(r=>`<div class="set-line" data-act="rec-edit" data-id="${r.id}" data-w="${w.id}"><span class="num">${fmtTime(r.ts)}</span>${esc(describe(r))||'—'}${gapHtml(gaps,r)}${r.notes?`<span class="note">«${esc(r.notes)}»</span>`:''}</div>`).join('')}
     </div>`;
   }).join('');
   if(!recs.length) html+='<div class="empty">Записей пока нет</div>';
-  else html+=`<p class="muted" style="margin:10px 2px 0">Нажмите на запись, чтобы исправить вес, повторы, время или удалить её.</p>`;
+  else html+=`<p class="muted" style="margin:10px 2px 0">${I('pause','sm')}— отдых перед подходом (время от предыдущей записи). Нажмите на запись, чтобы исправить или удалить её.</p>`;
   html+=`<button class="btn big" style="margin-top:14px" data-act="w-addrec" data-id="${w.id}">${I('plus')}Добавить упражнение</button>`;
   if(recs.length) html+=`<button class="btn ghost big" data-act="w-toprog" data-id="${w.id}">${I('clip')}Добавить в программу</button>`;
   html+=`<div class="grid2" style="margin-top:10px">
@@ -1430,15 +1551,14 @@ function renderStats(){
   const top=$('#statsTop'), body=$('#statsBody'), warn=$('#statsWarn');
   $$('#statsSeg button').forEach(b=>b.classList.toggle('active', b.dataset.mode===statsMode));
   warn.innerHTML=backupWarnHtml();
+  if(statsMode==='measures'){ top.innerHTML=''; body.innerHTML=measuresHtml(); return; }
 
   const ws=sortedWorkouts();
   if(!ws.length){
     top.innerHTML='';
-    $('#statsSeg').classList.add('hidden');
     body.innerHTML='<div class="empty">Пока нет тренировок.<br>Сохраните первую запись или загрузите таблицу.</div>';
     return;
   }
-  $('#statsSeg').classList.remove('hidden');
   const finished=ws.filter(w=>!isActive(w) && w.timed && w.end);
   const avg=finished.length ? finished.reduce((a,w)=>a+wDur(w),0)/finished.length : 0;
   const month=ws.filter(w=>w.start>Date.now()-30*DAY).length;
@@ -1448,8 +1568,216 @@ function renderStats(){
     <div class="stats-box"><div class="lbl">За 30 дней</div><div class="val">${month}</div></div>
     <div class="stats-box"><div class="lbl">${I('clock','sm')}Средняя длит.</div><div class="val">${avg?fmtDur(avg):'—'}</div></div>
     <div class="stats-box"><div class="lbl">${I('dumbbell','sm')}Тоннаж всего</div><div class="val">${totalTon?fmtTon(totalTon):'—'}</div></div>
-  </div>`;
+  </div>${weeklyHtml()}`;
   body.innerHTML = statsMode==='table' ? tableHtml(ws) : cardsHtml(ws);
+}
+
+/* ---- тоннаж по неделям: столбики за 12 недель, нажатие — подробности недели ---- */
+let WEEKS=[];
+function weekStart(ms){ const d=new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()-((d.getDay()+6)%7)).getTime(); }
+function weeklyHtml(){
+  if(!DB.records.length) return '';
+  const cur=weekStart(Date.now());
+  const first=weekStart(DB.records.reduce((m,r)=>Math.min(m,r.ts), Infinity));
+  // от первой записи, но не меньше 4 и не больше 12 недель
+  const N=Math.max(4, Math.min(12, Math.round((cur-first)/(7*DAY))+1));
+  WEEKS=[];
+  for(let i=N-1;i>=0;i--){ const st=new Date(cur); st.setDate(st.getDate()-7*i); WEEKS.push({start:st.getTime(), ton:0, w:new Set()}); }
+  const idx=new Map(WEEKS.map((x,i)=>[x.start,i]));
+  DB.records.forEach(r=>{ const i=idx.get(weekStart(r.ts)); if(i==null) return; WEEKS[i].ton+=ton(r); WEEKS[i].w.add(r.wId); });
+  const max=Math.max(...WEEKS.map(x=>x.ton));
+  if(!max) return '';
+  const W=300, H=100, gap=4, bw=(W-gap*(N-1))/N, rad=3;
+  const bars=WEEKS.map((x,i)=>{
+    const h=x.ton ? Math.max(3, x.ton/max*(H-4)) : 0, X=i*(bw+gap), Y=H-h;
+    const path = h ? `M${X},${H}V${Y+rad}Q${X},${Y} ${X+rad},${Y}H${X+bw-rad}Q${X+bw},${Y} ${X+bw},${Y+rad}V${H}Z` : '';
+    return `<g class="wk-bar${i===N-1?' sel':''}" data-act="wk" data-i="${i}">
+      <rect x="${X-gap/2}" y="0" width="${bw+gap}" height="${H}" fill="transparent"/>
+      ${h?`<path d="${path}"/>`:`<rect x="${X}" y="${H-1}" width="${bw}" height="1" class="wk-zero"/>`}</g>`;
+  }).join('');
+  const step=N<=6?1:3;
+  const lbl=WEEKS.map((x,i)=>`<span>${(N-1-i)%step===0?fmtDM(x.start):''}</span>`).join('');
+  return `<div class="card wk-card">
+    <div class="wk-head"><span class="wk-title">Тоннаж по неделям</span><span class="muted" id="wkCap">${wkCaption(N-1)}</span></div>
+    <svg class="wk-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>
+    <div class="wk-labels" style="grid-template-columns:repeat(${N},1fr)">${lbl}</div>
+  </div>`;
+}
+function wkCaption(i){
+  const x=WEEKS[i]; if(!x) return '';
+  const end=x.start+6*DAY, n=x.w.size;
+  return `${fmtDM(x.start)}–${fmtDM(end)}: <b>${x.ton?fmtTon(x.ton):'0'}</b> · ${n} ${plural(n,'трен.','трен.','трен.')}`;
+}
+function selectWeek(i){
+  $$('.wk-bar').forEach(g=>g.classList.toggle('sel', +g.dataset.i===i));
+  const c=$('#wkCap'); if(c) c.innerHTML=wkCaption(i);
+}
+
+/* ================== ЗАМЕРЫ ТЕЛА ================== */
+const MKINDS=[
+  {k:'weight',   name:'Вес тела',      unit:'кг'},
+  {k:'fat',      name:'Процент жира',  unit:'%'},
+  {k:'neck',     name:'Шея',           unit:'см'},
+  {k:'shoulders',name:'Плечи',         unit:'см'},
+  {k:'chest',    name:'Грудь',         unit:'см'},
+  {k:'waist',    name:'Талия',         unit:'см'},
+  {k:'hips',     name:'Таз (ягодицы)', unit:'см'},
+  {k:'biceps',   name:'Бицепс',        unit:'см'},
+  {k:'forearm',  name:'Предплечье',    unit:'см'},
+  {k:'thigh',    name:'Бедро',         unit:'см'},
+  {k:'calf',     name:'Голень',        unit:'см'}
+];
+function allKinds(){ return MKINDS.concat(DB.mkinds); }
+function kindOf(k){ return allKinds().find(x=>x.k===k); }
+function mValues(k){ return DB.measures.filter(m=>m.k===k).sort((a,b)=>a.ts-b.ts); }
+function fmtM(v, unit){ return fmtNum(v)+(unit?' '+unit:''); }
+function deltaHtml(vals, unit){
+  if(vals.length<2) return '';
+  const d=round(vals[vals.length-1].v-vals[vals.length-2].v, 2);
+  if(!d) return '<span class="m-delta">без изменений</span>';
+  return `<span class="m-delta">${d>0?'▲ +':'▼ −'}${fmtNum(Math.abs(d))} ${unit}</span>`;
+}
+// старые записи «Вес» как упражнения — предложить перенести в замеры
+function weightExercise(){
+  return DB.exercises.find(e=>['вес','вес тела','масса тела','взвешивание'].includes(normKey(e.name)) && DB.records.some(r=>r.exId===e.id));
+}
+function measuresHtml(){
+  const wx=weightExercise();
+  let html = wx ? `<div class="warn-line" data-act="m-migrate">${I('alert')}<span>Вес тела записан как упражнение «${esc(wx.name)}» (${DB.records.filter(r=>r.exId===wx.id).length} зап.) — нажмите, чтобы перенести в замеры. Тренировки с ним перестанут считаться тренировками.</span></div>` : '';
+  html+=`<button class="btn big" style="margin-top:0" data-act="m-add-all">${I('plus')}Записать замеры</button>
+    <div class="card list-card" style="margin-top:12px">`;
+  allKinds().forEach(kd=>{
+    const vals=mValues(kd.k), last=vals[vals.length-1];
+    html+=`<div class="rec-row" data-act="m-open" data-k="${esc(kd.k)}">
+      <div class="rec-main"><div class="rec-name">${esc(kd.name)}</div>
+        <div class="rec-desc">${last?`${fmtDate(last.ts)} ${deltaHtml(vals, kd.unit)}`:'нет замеров'}</div></div>
+      <div class="m-val">${last?fmtM(last.v, kd.unit):'—'}</div>
+      <div class="chev">${I('chev')}</div></div>`;
+  });
+  html+=`</div><button class="btn ghost big" data-act="m-kind-add">${I('plus')}Своя мерка</button>
+    <p class="muted" style="margin:10px 2px">Нажмите на мерку, чтобы увидеть график и историю. Обхваты удобнее мерить утром, в одном и том же месте.</p>`;
+  return html;
+}
+function mChart(vals, unit){
+  if(vals.length<2) return '';
+  const pts=vals.slice(-40), W=300, H=80, P=6;
+  const t0=pts[0].ts, t1=pts[pts.length-1].ts, mn=Math.min(...pts.map(p=>p.v)), mx=Math.max(...pts.map(p=>p.v));
+  const xy=pts.map(p=>[P+(t1===t0?0.5:(p.ts-t0)/(t1-t0))*(W-2*P), H-P-(mx===mn?0.5:(p.v-mn)/(mx-mn))*(H-2*P)]);
+  return `<div class="card spark" style="background:var(--card2)">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:80px">
+      <polyline points="${xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}" fill="none" stroke="#4f8cff" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      ${xy.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="#4f8cff"/>`).join('')}
+    </svg>
+    <div class="spark-range"><span>${fmtDM(t0)}</span><span>мин ${fmtM(mn,unit)} · макс ${fmtM(mx,unit)}</span><span>${fmtDM(t1)}</span></div>
+  </div>`;
+}
+function openMeasure(k){
+  const kd=kindOf(k); if(!kd) return;
+  const vals=mValues(k), last=vals[vals.length-1], first=vals[0];
+  const total = vals.length>1 ? round(last.v-first.v,2) : 0;
+  openModal(`<div class="sheet-head"><h2>${esc(kd.name)}</h2>${closeX()}</div>
+    ${last?`<div class="stats-summary">
+      <div class="stats-box"><div class="lbl">Сейчас</div><div class="val">${fmtM(last.v,kd.unit)}</div></div>
+      <div class="stats-box"><div class="lbl">С ${fmtDM(first.ts)}</div><div class="val">${vals.length>1?(total>0?'+':total<0?'−':'')+fmtNum(Math.abs(total))+' '+kd.unit:'—'}</div></div>
+    </div>`:''}
+    ${mChart(vals, kd.unit)}
+    <div class="grid2">
+      <div><label for="mVal">Значение, ${esc(kd.unit)}</label><input id="mVal" inputmode="decimal" placeholder="${last?esc(inVal(last.v)):'0'}" data-enter="m-save"></div>
+      <div><label for="mTs">Дата</label><input id="mTs" type="date" value="${dayKey(Date.now())}"></div>
+    </div>
+    <button class="btn ok big" data-act="m-save" data-k="${esc(k)}">${I('save')}Сохранить замер</button>
+    ${vals.length?`<div class="section-head"><span>История</span><span class="muted">нажмите, чтобы удалить</span></div>
+    <div class="card list-card">${vals.slice().reverse().map((m,i,a)=>{
+      const prev=a[i+1], d=prev?round(m.v-prev.v,2):0;
+      return `<div class="rec-row" data-act="m-del" data-id="${m.id}">
+        <div class="rec-main"><div class="rec-name">${fmtM(m.v,kd.unit)}</div>
+          <div class="rec-desc">${prev&&d?(d>0?'+':'−')+fmtNum(Math.abs(d))+' '+kd.unit:''}</div></div>
+        <div class="rec-side">${fmtDate(m.ts)}</div></div>`;}).join('')}</div>`:''}
+    ${k.startsWith('c')?`<button class="btn danger big" data-act="m-kind-del" data-k="${esc(k)}">${I('trash')}Удалить мерку</button>`:''}`);
+}
+function mDateTs(s){ const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(+m[1],+m[2]-1,+m[3],12,0).getTime() : null; }
+function mValOk(inp){
+  const raw=String(inp.value||'').replace(/[\s ]/g,'').replace(',','.');
+  if(!raw) return null;
+  const v=Number(raw);
+  if(!isFinite(v) || v<=0 || v>1000){ markBad(inp,true); return false; }
+  markBad(inp,false); return round(v,2);
+}
+function addMeasure(k, v, ts){
+  // в один день по одной мерке — одно значение (новое заменяет)
+  DB.measures=DB.measures.filter(m=>!(m.k===k && dayKey(m.ts)===dayKey(ts)));
+  DB.measures.push({id:nid('m'), k, ts, v});
+}
+function saveMeasure(k){
+  const inp=$('#mVal'), v=mValOk(inp);
+  if(v===false){ toast('Значение — от 0 до 1000', null, null, 3000, 'alert'); return; }
+  if(v==null){ markBad(inp,true); toast('Введите значение'); inp.focus(); return; }
+  const ts=mDateTs($('#mTs').value) || Date.now();
+  addMeasure(k, v, ts); save();
+  openMeasure(k); if(curView==='stats') renderStats();
+  toast('Замер сохранён', null, null, null, 'check');
+}
+async function delMeasure(id){
+  const m=DB.measures.find(x=>x.id===id); if(!m) return;
+  const kd=kindOf(m.k);
+  if(!await ask(`Удалить замер ${fmtM(m.v, kd?kd.unit:'')} от ${fmtDate(m.ts)}?`,'Удалить',true)) return;
+  DB.measures=DB.measures.filter(x=>x.id!==id); save();
+  openMeasure(m.k); if(curView==='stats') renderStats();
+}
+function openMeasureAll(){
+  openModal(`<div class="sheet-head"><h2>Записать замеры</h2>${closeX()}</div>
+    <label for="maTs">Дата</label><input id="maTs" type="date" value="${dayKey(Date.now())}">
+    <p class="muted" style="margin:8px 2px 0">Заполните только то, что мерили. В скобках — прошлое значение.</p>
+    <div class="grid2">${allKinds().map(kd=>{ const v=mValues(kd.k), last=v[v.length-1];
+      return `<div><label for="ma_${esc(kd.k)}">${esc(kd.name)}, ${esc(kd.unit)}</label>
+        <input id="ma_${esc(kd.k)}" class="ma-inp" data-k="${esc(kd.k)}" inputmode="decimal" placeholder="${last?'('+esc(inVal(last.v))+')':'—'}"></div>`; }).join('')}</div>
+    <button class="btn ok big" style="margin-top:16px" data-act="m-save-all">${I('save')}Сохранить</button>`);
+}
+function saveMeasureAll(){
+  const ts=mDateTs($('#maTs').value) || Date.now();
+  const got=[]; let bad=false;
+  $$('.ma-inp').forEach(inp=>{ const v=mValOk(inp); if(v===false) bad=true; else if(v!=null) got.push([inp.dataset.k, v]); });
+  if(bad){ toast('Проверьте выделенные поля: значение от 0 до 1000', null, null, 3500, 'alert'); return; }
+  if(!got.length){ toast('Заполните хотя бы один замер'); return; }
+  got.forEach(([k,v])=>addMeasure(k,v,ts)); save();
+  closeModal(); renderStats();
+  toast(`Сохранено замеров: ${got.length}`, null, null, null, 'check');
+}
+function addMeasureKind(){
+  openModal(`<h2>Своя мерка</h2>
+    <label for="mkName">Название</label><input id="mkName" placeholder="Например: Бицепс левый" autocomplete="off" autocapitalize="sentences">
+    <label for="mkUnit">Единица</label><input id="mkUnit" value="см" autocomplete="off">
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn ghost" data-act="close-modal">Отмена</button>
+      <button class="btn" data-act="m-kind-save">Создать</button>
+    </div>`);
+  $('#mkName').focus();
+}
+function saveMeasureKind(){
+  const name=cleanName($('#mkName').value), unit=cleanName($('#mkUnit').value)||'см';
+  if(!name){ markBad($('#mkName'),true); toast('Введите название'); return; }
+  if(allKinds().some(k=>normKey(k.name)===normKey(name))){ toast('Такая мерка уже есть'); return; }
+  const k='c'+nid('m');
+  DB.mkinds.push({k, name, unit}); save();
+  closeModal(); renderStats(); openMeasure(k);
+}
+async function delMeasureKind(k){
+  const kd=kindOf(k); if(!kd || !k.startsWith('c')) return;
+  const n=mValues(k).length;
+  if(!await ask(`Удалить мерку «${esc(kd.name)}»${n?` и ${n} ${plural(n,'замер','замера','замеров')}`:''}?`,'Удалить',true)) return;
+  DB.mkinds=DB.mkinds.filter(x=>x.k!==k); DB.measures=DB.measures.filter(m=>m.k!==k); save();
+  closeModal(); renderStats();
+}
+async function migrateWeight(){
+  const ex=weightExercise(); if(!ex) return;
+  const recs=DB.records.filter(r=>r.exId===ex.id && r.weight);
+  if(!await ask(`Перенести ${recs.length} ${plural(recs.length,'запись','записи','записей')} из упражнения «${esc(ex.name)}» в замеры «Вес тела»? Упражнение будет удалено.`,'Перенести')) return;
+  recs.forEach(r=>addMeasure('weight', r.weight, r.ts));
+  DB.records=DB.records.filter(r=>r.exId!==ex.id);
+  DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>{ d.items=d.items.filter(it=>it.exId!==ex.id); })));
+  DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
+  cleanupWorkouts(); save(); renderWorkoutBar(); renderStats();
+  toast('Вес тела перенесён в замеры', null, null, null, 'check');
 }
 
 function cardsHtml(ws){
@@ -1895,13 +2223,29 @@ function planCtx(){
   return findDay(pl.dayId);
 }
 // какие пункты плана уже сделаны: по числу записей этого упражнения в идущей тренировке
+// выполнение плана по подходам: у пункта «4 подхода» — нужно 4 записанных подхода этого упражнения
 function planStatus(x){
-  const w=activeW(), cnt=new Map(), used=new Map();
-  (w ? recsOfW(w.id) : []).forEach(r=>cnt.set(r.exId, (cnt.get(r.exId)||0)+1));
+  const w=activeW(), avail=new Map();
+  (w ? recsOfW(w.id) : []).forEach(r=>avail.set(r.exId, (avail.get(r.exId)||0)+setUnits(r)));
   return x.d.items.map(it=>{
-    const k=(used.get(it.exId)||0)+1; used.set(it.exId, k);
-    return k <= (cnt.get(it.exId)||0);
+    const need=Math.max(1, Math.round(it.sets||1));
+    const a=avail.get(it.exId)||0, done=Math.min(need, a);
+    avail.set(it.exId, a-done);
+    return {need, done, ok: done>=need};
   });
+}
+// строка про программу в подсказке «Прошлый раз»
+function planLineFor(exId){
+  const x=planCtx(); if(!x) return '';
+  const st=planStatus(x);
+  let i=x.d.items.findIndex((it,k)=>it.exId===exId && !st[k].ok);
+  if(i<0){
+    if(x.d.items.some(it=>it.exId===exId)) return 'По программе: всё выполнено';
+    return '';
+  }
+  const it=x.d.items[i];
+  const tgt=setLabel(it);
+  return `По программе: ${esc(tgt)} · подход <b>${st[i].done+1} из ${st[i].need}</b>`;
 }
 function renderPlan(){
   const box=$('#planBox'); if(!box) return;
@@ -1911,17 +2255,19 @@ function renderPlan(){
     box.innerHTML = hasPlanDays() ? `<button class="btn ghost plan-open" data-act="plan-pick">${I('clip')}Тренировка по программе</button>` : '';
     return;
   }
-  const st=planStatus(x), done=st.filter(Boolean).length, next=st.indexOf(false);
+  const st=planStatus(x), done=st.filter(s=>s.ok).length, next=st.findIndex(s=>!s.ok);
+  const needAll=st.reduce((a,s)=>a+s.need,0), doneAll=st.reduce((a,s)=>a+s.done,0);
   box.innerHTML=`<div class="card plan-card">
     <div class="plan-head">
       <div class="plan-title-wrap"><div class="plan-sub">${esc(x.p.name)} · ${esc(x.f.name)}</div><div class="plan-title">${esc(x.d.name)}</div></div>
       <div class="plan-count">${done}/${st.length}</div>
       <button class="icon-btn sm" data-act="plan-close" aria-label="Убрать программу">${I('x')}</button>
     </div>
-    <div class="progress plan-progress"><div style="width:${st.length?Math.round(done/st.length*100):0}%"></div></div>
+    <div class="progress plan-progress"><div style="width:${needAll?Math.round(doneAll/needAll*100):0}%"></div></div>
     ${x.d.items.map((it,i)=>{ const e=exById(it.exId);
-      return `<div class="plan-row${st[i]?' done':''}${i===next?' next':''}" data-act="plan-fill" data-i="${i}">
-        <span class="plan-mark">${st[i]?I('check'):(i+1)}</span>
+      const s=st[i], part=!s.ok && s.done>0;
+      return `<div class="plan-row${s.ok?' done':''}${i===next?' next':''}" data-act="plan-fill" data-i="${i}">
+        <span class="plan-mark${part?' part':''}">${s.ok?I('check'):part?`${s.done}/${s.need}`:(i+1)}</span>
         <div class="rec-main"><div class="rec-name">${esc(e?e.name:'?')}</div>
           <div class="rec-desc">${esc(describe(it))||'—'}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
       </div>`; }).join('')}
@@ -1963,14 +2309,15 @@ function closePlan(){
 function renderPlanNext(){
   const box=$('#planNext'); if(!box) return;
   const x=planCtx();
-  const next = x ? planStatus(x).indexOf(false) : -1;
+  const st = x ? planStatus(x) : [];
+  const next = st.findIndex(s=>!s.ok);
   const it = next>=0 ? x.d.items[next] : null;
   const e = it && exById(it.exId);
   // уже подставлено (или введено вручную) — подсказка не нужна
   if(!e || normKey(exInput.value)===normKey(e.name)){ box.innerHTML=''; return; }
   box.innerHTML=`<div class="plan-next" data-act="plan-next" data-i="${next}">
     <span class="plan-mark">${next+1}</span>
-    <div class="rec-main"><div class="plan-next-lbl">Следующее по программе</div>
+    <div class="rec-main"><div class="plan-next-lbl">Следующее по программе${st[next].need>1?` · подход ${st[next].done+1} из ${st[next].need}`:''}</div>
       <div class="rec-name">${esc(e.name)}</div>
       <div class="rec-desc">${esc(describe(it))||'—'}</div></div>
     <span class="plan-next-btn">Подставить</span>
@@ -1981,7 +2328,8 @@ function fillFromPlan(i, noScroll){
   const it=x.d.items[i]; if(!it) return;
   const e=exById(it.exId);
   exInput.value=e ? e.name : '';
-  setVal('mReps',it.reps); setVal('mSets',it.sets); setVal('mWeight',it.weight);
+  // подходы записываются по одному: в поле «Подходы» — 1, счётчик «подход k из n» — в подсказке
+  setVal('mWeight',it.weight); setVal('mReps',it.reps); setVal('mSets', (it.sets||1)>1 ? 1 : it.sets);
   $('#mTime').value=minIn(it.time);
   $('#mNotes').value='';
   NUM_FIELDS.forEach(id=>markBad($('#'+id),false));
@@ -2222,7 +2570,8 @@ function csvPayload(rows, name){
 const BACKUP_APP='fitness-tracker-backup';
 function backupData(){
   return {app:BACKUP_APP, v:1, created:new Date().toISOString(),
-    data:{v:DB.v, exercises:DB.exercises, records:DB.records, workouts:DB.workouts, programs:DB.programs, seq:DB.seq}};
+    data:{v:DB.v, exercises:DB.exercises, records:DB.records, workouts:DB.workouts, programs:DB.programs,
+      measures:DB.measures, mkinds:DB.mkinds, seq:DB.seq}};
 }
 function openBackup(){
   exportCtx={kind:'backup'};
@@ -2732,14 +3081,14 @@ async function runImport(mode){
   const P=pendingImport;
   if(!P) return;
   if(mode==='replace'){
-    const ok=await ask(`Все текущие записи (${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}) будут удалены и заменены таблицей. Программы останутся. Если сомневаетесь — сначала сделайте полную копию.`,'Заменить',true);
+    const ok=await ask(`Все текущие записи (${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}) будут удалены и заменены таблицей. Программы и замеры останутся. Если сомневаетесь — сначала сделайте полную копию.`,'Заменить',true);
     if(!ok) return;
     // программы и упражнения, на которые они ссылаются, сохраняются
-    const keepExport=DB.lastExport, progs=DB.programs, seq=Object.assign({}, DB.seq);
+    const keepExport=DB.lastExport, progs=DB.programs, seq=Object.assign({}, DB.seq), meas=DB.measures, mk=DB.mkinds;
     const used=new Set(); forEachItem(it=>used.add(it.exId));
     const keepEx=DB.exercises.filter(e=>used.has(e.id));
     resetAll();
-    DB.lastExport=keepExport; DB.programs=progs; DB.exercises=keepEx; DB.seq=seq;
+    DB.lastExport=keepExport; DB.programs=progs; DB.exercises=keepEx; DB.seq=seq; DB.measures=meas; DB.mkinds=mk;
   }
   const res=applyImport(P);
   pendingImport=null;
@@ -2835,6 +3184,16 @@ document.addEventListener('click', e=>{
     case 'w-edit-save':      saveWorkoutEdit(id); break;
     case 'w-del':            deleteWorkout(id); break;
     case 'stats-mode':       statsMode=el.dataset.mode; renderStats(); break;
+    case 'wk':               selectWeek(+el.dataset.i); break;
+    case 'm-open':           openMeasure(el.dataset.k); break;
+    case 'm-save':           saveMeasure(el.dataset.k || (document.querySelector('[data-act="m-save"][data-k]')||{}).dataset.k); break;
+    case 'm-del':            delMeasure(id); break;
+    case 'm-add-all':        openMeasureAll(); break;
+    case 'm-save-all':       saveMeasureAll(); break;
+    case 'm-kind-add':       addMeasureKind(); break;
+    case 'm-kind-save':      saveMeasureKind(); break;
+    case 'm-kind-del':       delMeasureKind(el.dataset.k); break;
+    case 'm-migrate':        migrateWeight(); break;
     case 'data':             openDataSheet(); break;
     case 'export':           openExport(); break;
     case 'export-share':     shareExport(); break;
