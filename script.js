@@ -1,6 +1,6 @@
 'use strict';
 /* =====================================================================
-   Фитнес-трекер — все данные хранятся локально (localStorage)
+   WTFIT — дневник тренировок, все данные хранятся локально (localStorage)
    ===================================================================== */
 
 const DB_KEY  = 'fitness_v4';
@@ -464,7 +464,7 @@ function isIOS(){
 function homeHintHtml(){
   if(navigator.standalone!==false || !isIOS()) return '';
   try{ if(localStorage.getItem(HINT_KEY)) return ''; }catch(e){}
-  return `<div class="warn-line">${I('alert')}<span>Откройте трекер с иконки: Поделиться → «На экран Домой». В обычной вкладке Safari данные хранятся отдельно и могут стереться, если не заходить 7 дней.</span><button class="hint-x" data-act="hint-off" aria-label="Скрыть">${I('x')}</button></div>`;
+  return `<div class="warn-line">${I('alert')}<span>Откройте WTFIT с иконки: Поделиться → «На экран Домой». В обычной вкладке Safari данные хранятся отдельно и могут стереться, если не заходить 7 дней.</span><button class="hint-x" data-act="hint-off" aria-label="Скрыть">${I('x')}</button></div>`;
 }
 function renderNotices(){
   const box=$('#recNotice');
@@ -2568,9 +2568,10 @@ function saveAddToProg(){
 /* ================== ДАННЫЕ ================== */
 function openDataSheet(){
   const nW=sortedWorkouts().length;
-  openModal(`<div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
+  openModal(`<div class="brand"><img src="icon-192.png" alt="" width="44" height="44"><div><div class="brand-name">WTFIT</div><div class="muted">дневник тренировок · версия ${esc(APP_VERSION)}</div></div></div>
+    <div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
     <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.<br>
-    ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}<br>Версия приложения: ${esc(APP_VERSION)}</p>
+    ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}</p>
     <p class="muted" id="persistInfo">Защита хранилища: проверяется…</p>
     <button class="btn big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
     <button class="btn ghost big" data-act="import" data-kind="backup">${I('swap')}Восстановить из копии</button>
@@ -2704,11 +2705,11 @@ function exportPayload(){
   if(exportCtx.kind==='records'){
     const rows=buildRows();
     if(rows.length<2){ toast('Пока нечего выгружать'); return null; }
-    return csvPayload(rows, `Тренировки_${today}.csv`);
+    return csvPayload(rows, `WTFIT_тренировки_${today}.csv`);
   }
   if(exportCtx.kind==='backup'){
     const text=JSON.stringify(backupData());
-    return {file:text, copy:text, name:`Полная_копия_${today}.json`, mime:'application/json', backup:true};
+    return {file:text, copy:text, name:`WTFIT_копия_${today}.json`, mime:'application/json', backup:true};
   }
   if(exportCtx.kind==='template') return csvPayload(templateRows(), 'Шаблон_программы.csv');
   const progs=(exportCtx.ids||[]).map(progById).filter(Boolean);
@@ -2989,7 +2990,7 @@ function previewBackup(text){
   let B;
   try{ B=JSON.parse(text); }catch(e){ ask('Файл копии повреждён — не удалось его прочитать.','OK',false,null); return; }
   const d=B && B.app===BACKUP_APP && B.data;
-  if(!d || !Array.isArray(d.records) || !Array.isArray(d.exercises)){ ask('Это не файл полной копии трекера.','OK',false,null); return; }
+  if(!d || !Array.isArray(d.records) || !Array.isArray(d.exercises)){ ask('Это не файл полной копии WTFIT.','OK',false,null); return; }
   pendingBackup=d;
   const nW=new Set(d.records.map(r=>r.wId)).size, nP=Array.isArray(d.programs)?d.programs.length:0;
   const when=B.created ? new Date(B.created) : null;
@@ -3035,7 +3036,7 @@ function handleImportText(text, kind){
   const trimmed=String(text).replace(/^\ufeff/,'').trim();
   if(trimmed.startsWith('{')){ previewBackup(trimmed); return; }
   if(kind==='backup'){
-    ask('Это не файл полной копии. Выберите файл вида <b>Полная_копия_….json</b>. Таблицы загружаются кнопкой «Загрузить» в Статистике (записи) или в Программах.','OK',false,null);
+    ask('Это не файл полной копии. Выберите файл вида <b>WTFIT_копия_….json</b> (или старый <b>Полная_копия_….json</b>). Таблицы загружаются кнопкой «Загрузить» в Статистике (записи) или в Программах.','OK',false,null);
     return;
   }
   const rows=parseDelimited(text);

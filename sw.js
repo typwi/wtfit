@@ -6,7 +6,7 @@
 importScripts('./version.js');             // версия задаётся в version.js
 const VERSION = self.APP_VERSION;
 const CORE  = ['./', './index.html', './style.css', './version.js', './script.js', './manifest.webmanifest'];
-const EXTRA = ['./icon-180.png', './icon-192.png', './icon-512.png'];   // иконки — по возможности
+const EXTRA = ['./icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './favicon-32.png'];   // иконки — по возможности
 
 const fresh = url => fetch(new Request(url, { cache: 'no-cache' }));
 
