@@ -544,17 +544,50 @@ exSuggest.addEventListener('click', e=>{
 
 function formEmpty(){ return NUM_FIELDS.every(id=>!$('#'+id).value.trim()); }
 function setVal(id,v){ $('#'+id).value=inVal(v); }
-function fillFromLast(){
-  const ex=exByName(exInput.value); if(!ex) return;
+// данные для подсказки: подходы прошлой тренировки и пункта программы по этому упражнению
+function hintCtx(ex){
   const cur=curSessionW(ex.id), sess=exSessions(ex.id);
-  const prev=sess.find(x=>x.wId!==cur); if(!prev) return;
-  const today=sess.find(x=>x.wId===cur);
-  const sets=expandSets(prev.recs);
+  const prev=sess.find(x=>x.wId!==cur), today=sess.find(x=>x.wId===cur);
   const done=today ? expandSets(today.recs).length : 0;
-  const r=sets[Math.min(done, sets.length-1)];       // следующий по счёту подход прошлой тренировки
-  setVal('mWeight',r.weight); setVal('mReps',r.reps); setVal('mSets',r.sets); $('#mTime').value=minIn(r.time);
+  const prevSets=prev ? expandSets(prev.recs) : [];
+  let plan=null;
+  const x=planCtx();
+  if(x){
+    const st=planStatus(x);
+    let i=x.d.items.findIndex((it,k)=>it.exId===ex.id && !st[k].ok);
+    if(i<0) i=x.d.items.findIndex(it=>it.exId===ex.id);
+    if(i>=0){
+      const it=x.d.items[i];
+      plan={i, it, day:x.d.name, need:st[i].need, done:st[i].done, sets:Array.from({length:st[i].need},()=>it)};
+    }
+  }
+  return {cur, prev, today, done, prevSets, plan};
+}
+// подставить ОДИН подход (вес, повторы, время); в «Подходы» — 1
+function fillSet(r){
+  if(!r) return;
+  setVal('mWeight',r.weight); setVal('mReps',r.reps); setVal('mSets', (r.weight||r.reps) ? 1 : null);
+  $('#mTime').value=minIn(r.time);
   NUM_FIELDS.forEach(id=>markBad($('#'+id),false));
   renderLastHint();
+}
+// «Подставить» в строке «Прошлый раз» — выделенный (следующий) подход
+function fillFromLast(){
+  const ex=exByName(exInput.value); if(!ex) return;
+  const c=hintCtx(ex); if(!c.prevSets.length) return;
+  fillSet(c.prevSets[Math.min(c.done, c.prevSets.length-1)]);
+}
+// «Подставить» в строке «Программа»
+function fillFromPlanEx(){
+  const ex=exByName(exInput.value); if(!ex) return;
+  const c=hintCtx(ex); if(!c.plan) return;
+  fillSet(c.plan.it);
+}
+// нажатие на конкретный подход
+function fillChip(src, i){
+  const ex=exByName(exInput.value); if(!ex) return;
+  const c=hintCtx(ex);
+  fillSet(src==='plan' ? (c.plan && c.plan.it) : c.prevSets[i]);
 }
 function clearForm(withName){
   NUM_FIELDS.forEach(id=>$('#'+id).value='');
@@ -613,30 +646,30 @@ function renderLastHint(){
   const box=$('#lastHint');
   const ex=exByName(exInput.value);
   if(!ex){ box.innerHTML=''; return; }
-  const cur=curSessionW(ex.id), sess=exSessions(ex.id);
-  const prev=sess.find(x=>x.wId!==cur), today=sess.find(x=>x.wId===cur);
-  const done=today ? expandSets(today.recs).length : 0;
-  const pl=planLineFor(ex.id);
-  if(!prev && !today && !pl){
+  const c=hintCtx(ex);
+  if(!c.prev && !c.today && !c.plan){
     box.innerHTML=`<div class="hint-card"><div class="muted">Прошлый раз · записей по «${esc(ex.name)}» ещё нет</div></div>`;
     return;
   }
-  let html='<div class="hint-card"><div class="hint-main">';
-  if(prev){
-    const sets=expandSets(prev.recs);
-    html+=`<div class="muted">Прошлый раз · ${relDay(prev.recs[0].ts)}${cur?` · сегодня: <b class="hint-today">${done} из ${sets.length}</b>`:''}</div>
-      <div class="hint-sets">${sets.map((r,i)=>`<span class="hs${i<done?' done':''}${cur && i===done?' next':''}">${esc(setLabel(r))}</span>`).join('')}</div>`;
-  } else if(today){
-    html+=`<div class="muted">Раньше не делали · сегодня: <b class="hint-today">${done} ${plural(done,'подход','подхода','подходов')}</b></div>`;
+  const chips=(sets, done, src)=>`<div class="hint-sets">${sets.map((r,i)=>
+    `<button type="button" class="hs${i<done?' done':''}${i===done?' next':''}" data-act="fill-chip" data-src="${src}" data-i="${i}">${esc(setLabel(r))}</button>`).join('')}</div>`;
+  let html='<div class="hint-card hint-col">';
+  if(c.prev){
+    html+=`<div class="hint-row"><div class="hint-lbl">Прошлый раз · ${relDay(c.prev.recs[0].ts)}${c.cur?` · сегодня <b>${c.done} из ${c.prevSets.length}</b>`:''}</div>
+      <button class="btn ghost sm" data-act="fill-last">Подставить</button></div>${chips(c.prevSets, c.cur?c.done:-1, 'prev')}`;
   }
-  if(pl) html+=`<div class="hint-plan">${I('clip','sm')}${pl}</div>`;
+  if(c.plan){
+    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · ${esc(c.plan.day)} · <b>${c.plan.done} из ${c.plan.need}</b></div>
+      <button class="btn ghost sm" data-act="fill-plan-ex">Подставить</button></div>${chips(c.plan.sets, c.plan.done, 'plan')}`;
+  }
+  if(!c.prev && c.today){
+    html+=`<div class="hint-lbl">Раньше не делали · сегодня <b>${c.done} ${plural(c.done,'подход','подхода','подходов')}</b></div>`;
+  }
   const pr=exPR(ex.id), wv=num($('#mWeight').value), parts=[];
   if(pr.maxW) parts.push(`макс ${fmtNum(pr.maxW)} кг`);
   if(pr.e1) parts.push(`1ПМ ≈ ${fmtNum(round(pr.e1,1))} кг`);
   if(wv && pr.byW.has(wv)) parts.push(`на ${fmtNum(wv)} кг — ${fmtNum(pr.byW.get(wv).reps)} повт`);
   if(parts.length) html+=`<div class="muted hint-pr">${I('trophy','sm')}${parts.join(' · ')}</div>`;
-  html+='</div>';
-  if(prev) html+=`<button class="btn ghost sm" data-act="fill-last">Подставить</button>`;
   box.innerHTML=html+'</div>';
 }
 
@@ -694,9 +727,13 @@ function saveRecord(){
   $('#mNotes').value='';
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   try{ navigator.vibrate && navigator.vibrate(30); }catch(e){}
+  // автоотдых — только во время идущей тренировки и не для кардио «по времени»
+  let autoStarted=false;
+  if(autoRest && DB.active.wId && (reps || weight)){ startRest(lastRest, true); autoStarted=true; }
   renderRecord();
 
-  toast(prMsg||'Сохранено', 'Отменить', ()=>{
+  toast((prMsg||'Сохранено')+(autoStarted?` · отдых ${fmtClock(lastRest)}`:''), 'Отменить', ()=>{
+    if(autoStarted && DB.active.restEnd){ DB.active.restEnd=null; DB.active.restTotal=0; save(); hideRest(); }
     DB.records=DB.records.filter(r=>r.id!==rec.id);
     if(createdEx && !DB.records.some(r=>r.exId===ex.id)) DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
     cleanupWorkouts(); save(); refresh();
@@ -735,7 +772,83 @@ async function stopWorkout(){
   if(w){ w.end=Date.now(); w.timed=true; had=DB.records.some(r=>r.wId===w.id); }
   cleanupWorkouts(); save();
   renderWorkoutBar(); refresh();
-  toast(had ? `Тренировка завершена · ${fmtDur((w.end-w.start)/1000)}` : 'Пустая тренировка не сохранена', null, null, null, had?'flag':null);
+  if(had) openSummary(w.id);
+  else toast('Пустая тренировка не сохранена');
+}
+
+/* ---- итог тренировки ---- */
+// рекорды, поставленные в тренировке: сравнение с тем, что было до каждой записи
+function workoutPRs(wId){
+  const out=[];
+  recsOfW(wId).forEach(r=>{
+    if(!r.weight) return;
+    const before=DB.records.filter(x=>x.exId===r.exId && x.ts<r.ts);
+    if(!before.length) return;
+    const maxW=before.reduce((m,x)=>Math.max(m,x.weight||0),0);
+    const atW=before.filter(x=>x.weight===r.weight && x.reps).reduce((m,x)=>Math.max(m,x.reps),0);
+    const ex=exById(r.exId), name=ex?ex.name:'?';
+    if(maxW && r.weight>maxW) out.push({exId:r.exId, text:`${name}: вес ${fmtNum(r.weight)} кг`});
+    else if(r.reps && atW && r.reps>atW) out.push({exId:r.exId, text:`${name}: ${fmtNum(r.weight)} кг × ${fmtNum(r.reps)}`});
+  });
+  // по одному (последнему) рекорду на упражнение
+  const m=new Map(); out.forEach(x=>m.set(x.exId, x));
+  return [...m.values()];
+}
+// прошлая «такая же» тренировка: та же программа, иначе с максимальным совпадением упражнений (от половины)
+function similarPrev(w){
+  const ws=sortedWorkouts().filter(x=>x.id!==w.id && x.start<w.start && !isActive(x));
+  if(w.plan){ const same=ws.filter(x=>x.plan===w.plan); if(same.length) return same[same.length-1]; }
+  const mine=new Set(recsOfW(w.id).map(r=>r.exId));
+  let best=null, bestScore=0;
+  ws.forEach(x=>{
+    const theirs=new Set(recsOfW(x.id).map(r=>r.exId));
+    let common=0; mine.forEach(e=>{ if(theirs.has(e)) common++; });
+    const score=common/Math.max(mine.size, theirs.size, 1);
+    if(score>=0.5 && score>=bestScore){ best=x; bestScore=score; }
+  });
+  return best;
+}
+function wStats(w){
+  const recs=recsOfW(w.id);
+  return {ton:recs.reduce((a,r)=>a+ton(r),0), sets:expandSets(recs).length, dur:wDur(w), ex:new Set(recs.map(r=>r.exId)).size, rest:w.rest||0};
+}
+function cmpHtml(label, a, b, fmt, better){
+  if(!b) return '';
+  const d=a-b, pct=b ? Math.round(d/b*100) : 0;
+  const sign=d>0?'+':d<0?'−':'';
+  const cls = !d ? '' : ((better==='up')===(d>0) ? 'up' : 'down');
+  return `<div class="cmp-row"><span>${label}</span><span class="cmp-v">${fmt(b)} → <b>${fmt(a)}</b></span>
+    <span class="cmp-d ${cls}">${d?sign+(pct?Math.abs(pct)+'%':fmt(Math.abs(d))):'='}</span></div>`;
+}
+function openSummary(wId){
+  const w=wById(wId); if(!w) return;
+  const st=wStats(w), prs=workoutPRs(wId), prev=similarPrev(w);
+  const d=new Date(w.start);
+  let html=`<div class="sheet-head"><h2>${I('flag')} Тренировка завершена</h2>${closeX()}</div>
+    <div class="muted" style="margin-bottom:${w.plan?4:12}px">${WD[d.getDay()]}, ${fmtDate(w.start)} · ${fmtTime(w.start)}–${fmtTime(w.end||Date.now())}</div>
+    ${w.plan?`<div class="workout-plan" style="margin-bottom:12px">${I('clip','sm')}${esc(w.plan)}</div>`:''}
+    <div class="stats-summary">
+      <div class="stats-box"><div class="lbl">${I('clock','sm')}Длительность</div><div class="val">${st.dur?fmtDur(st.dur):'—'}</div></div>
+      <div class="stats-box"><div class="lbl">${I('dumbbell','sm')}Тоннаж</div><div class="val">${st.ton?fmtTon(st.ton):'—'}</div></div>
+      <div class="stats-box"><div class="lbl">Подходов</div><div class="val">${st.sets}</div></div>
+      <div class="stats-box"><div class="lbl">Упражнений</div><div class="val">${st.ex}</div></div>
+    </div>`;
+  html+=`<div class="sum-block"><div class="sum-title">${I('trophy','sm')}Рекорды: ${prs.length||'нет'}</div>
+    ${prs.map(x=>`<div class="sum-line">${esc(x.text)}</div>`).join('')}</div>`;
+  if(prev){
+    const ps=wStats(prev), pd=new Date(prev.start);
+    html+=`<div class="sum-block"><div class="sum-title">Сравнение с ${WD[pd.getDay()]} ${fmtDM(prev.start)}${prev.plan&&prev.plan===w.plan?' (та же тренировка программы)':''}</div>
+      ${cmpHtml('Тоннаж', st.ton, ps.ton, v=>v?fmtTon(v):'0', 'up')}
+      ${cmpHtml('Подходы', st.sets, ps.sets, v=>String(v), 'up')}
+      ${st.dur&&ps.dur?cmpHtml('Длительность', st.dur, ps.dur, v=>fmtDur(v), 'down'):''}
+      ${st.rest&&ps.rest?cmpHtml('Отдых', st.rest, ps.rest, v=>fmtDur(v), 'down'):''}</div>`;
+  } else {
+    html+=`<div class="sum-block muted">Похожих прошлых тренировок пока нет — сравнение появится в следующий раз.</div>`;
+  }
+  html+=`<div class="grid2" style="margin-top:14px">
+    <button class="btn ghost" data-act="w-open" data-id="${w.id}">Подробнее</button>
+    <button class="btn" data-act="close-modal">Готово</button></div>`;
+  openModal(html);
 }
 function renderWorkoutBar(){
   const w=activeW(), bar=$('#timerBar'), btn=$('#btnTimer');
@@ -787,7 +900,29 @@ async function checkForgotten(){
 /* ================== ТАЙМЕР ОТДЫХА ================== */
 let rInterval=null;
 
-function startRest(sec){
+/* Автоотдых: после «Сохранить» (во время идущей тренировки) сам запускается отдых
+   с последним выбранным временем. Переключатель — над кнопками отдыха. */
+const AUTOREST_KEY='fitness_auto_rest', LASTREST_KEY='fitness_last_rest';
+let autoRest=true, lastRest=120;
+try{
+  const a=localStorage.getItem(AUTOREST_KEY); if(a!=null) autoRest=a==='1';
+  const l=+localStorage.getItem(LASTREST_KEY); if(l>0) lastRest=l;
+}catch(e){}
+function renderRestPresets(){
+  const cb=$('#autoRest'); if(cb) cb.checked=autoRest;
+  const t=$('#autoRestTime'); if(t) t.textContent=fmtClock(lastRest);
+  $$('.rest-presets .chip[data-sec]').forEach(c=>c.classList.toggle('sel', +c.dataset.sec===lastRest));
+  const cu=$('.rest-presets .chip[data-act="rest-custom"]');
+  if(cu) cu.classList.toggle('sel', ![60,120,180,300].includes(lastRest));
+}
+function setAutoRest(on){
+  autoRest=on;
+  try{ localStorage.setItem(AUTOREST_KEY, on?'1':'0'); }catch(e){}
+  renderRestPresets();
+  toast(on ? `Автоотдых включён: ${fmtClock(lastRest)} после каждого сохранения` : 'Автоотдых выключен', null, null, 2500, on?'timer':null);
+}
+function startRest(sec, auto){
+  if(!auto){ lastRest=sec; try{ localStorage.setItem(LASTREST_KEY, String(sec)); }catch(e){} renderRestPresets(); }
   unlockAudio();
   askNotify();
   if(DB.active.restEnd) cancelRest();
@@ -1437,10 +1572,12 @@ function openWorkout(id){
   else html+=`<p class="muted" style="margin:10px 2px 0">${I('pause','sm')}— отдых перед подходом (время от предыдущей записи). Нажмите на запись, чтобы исправить или удалить её.</p>`;
   html+=`<button class="btn big" style="margin-top:14px" data-act="w-addrec" data-id="${w.id}">${I('plus')}Добавить упражнение</button>`;
   if(recs.length) html+=`<button class="btn ghost big" data-act="w-toprog" data-id="${w.id}">${I('clip')}Добавить в программу</button>`;
+  const fin=!isActive(w);
   html+=`<div class="grid2" style="margin-top:10px">
-    ${isActive(w)?'<button class="btn ghost" data-act="close-modal">Закрыть</button>':`<button class="btn ghost" data-act="w-edit" data-id="${w.id}">${I('edit')}Дата и время</button>`}
-    <button class="btn danger" data-act="w-del" data-id="${w.id}">${I('trash')}Удалить</button>
-  </div>`;
+    ${fin&&recs.length?`<button class="btn ghost" data-act="w-summary" data-id="${w.id}">${I('flag')}Итог</button>`:'<button class="btn ghost" data-act="close-modal">Закрыть</button>'}
+    ${fin?`<button class="btn ghost" data-act="w-edit" data-id="${w.id}">${I('edit')}Дата и время</button>`:`<button class="btn danger" data-act="w-del" data-id="${w.id}">${I('trash')}Удалить</button>`}
+  </div>
+  ${fin?`<button class="btn danger big" data-act="w-del" data-id="${w.id}">${I('trash')}Удалить тренировку</button>`:''}`;
   openModal(html);
 }
 // добавить в тренировку забытое упражнение
@@ -2234,19 +2371,6 @@ function planStatus(x){
     return {need, done, ok: done>=need};
   });
 }
-// строка про программу в подсказке «Прошлый раз»
-function planLineFor(exId){
-  const x=planCtx(); if(!x) return '';
-  const st=planStatus(x);
-  let i=x.d.items.findIndex((it,k)=>it.exId===exId && !st[k].ok);
-  if(i<0){
-    if(x.d.items.some(it=>it.exId===exId)) return 'По программе: всё выполнено';
-    return '';
-  }
-  const it=x.d.items[i];
-  const tgt=setLabel(it);
-  return `По программе: ${esc(tgt)} · подход <b>${st[i].done+1} из ${st[i].need}</b>`;
-}
 function renderPlan(){
   const box=$('#planBox'); if(!box) return;
   const x=planCtx();
@@ -2329,7 +2453,7 @@ function fillFromPlan(i, noScroll){
   const e=exById(it.exId);
   exInput.value=e ? e.name : '';
   // подходы записываются по одному: в поле «Подходы» — 1, счётчик «подход k из n» — в подсказке
-  setVal('mWeight',it.weight); setVal('mReps',it.reps); setVal('mSets', (it.sets||1)>1 ? 1 : it.sets);
+  setVal('mWeight',it.weight); setVal('mReps',it.reps); setVal('mSets', (it.weight||it.reps) ? 1 : null);
   $('#mTime').value=minIn(it.time);
   $('#mNotes').value='';
   NUM_FIELDS.forEach(id=>markBad($('#'+id),false));
@@ -3183,6 +3307,9 @@ document.addEventListener('click', e=>{
     case 'w-edit':           openWorkoutEdit(id); break;
     case 'w-edit-save':      saveWorkoutEdit(id); break;
     case 'w-del':            deleteWorkout(id); break;
+    case 'fill-chip':        fillChip(el.dataset.src, +el.dataset.i); break;
+    case 'fill-plan-ex':     fillFromPlanEx(); break;
+    case 'w-summary':        openSummary(id); break;
     case 'stats-mode':       statsMode=el.dataset.mode; renderStats(); break;
     case 'wk':               selectWeek(+el.dataset.i); break;
     case 'm-open':           openMeasure(el.dataset.k); break;
@@ -3247,6 +3374,7 @@ document.addEventListener('click', e=>{
 
 document.addEventListener('change', e=>{
   const t=e.target;
+  if(t.id==='autoRest'){ setAutoRest(t.checked); return; }
   if(t.id==='importFile') onImportFile(t);
   else if(t.dataset && t.dataset.filter==='ex'){ tblEx=t.value; renderStats(); }
   else if(t.dataset && t.dataset.filter==='period'){ tblPeriod=t.value; renderStats(); }
@@ -3335,6 +3463,7 @@ if('serviceWorker' in navigator && location.protocol==='https:'){
 
 /* ================== СТАРТ ================== */
 initTopRest();
+renderRestPresets();
 $$('.note-toggle').forEach(b=>b.classList.toggle('active', notesOn));
 $('#scroller').addEventListener('scroll', ()=>{ if(DB.active.restEnd) updateTopRest(); }, {passive:true});
 askPersist();
