@@ -539,3 +539,44 @@ label.auto-rest{display:flex;align-items:center;gap:6px;margin:0;text-transform:
 .pi-row2{display:flex;align-items:flex-end;gap:10px;margin:0 0 8px}
 .pi-rest{flex:0 0 90px}
 label.check.pi-warm{margin:0 0 10px;font-size:14px}
+
+/* «Запись»: тренировка и отдых в одной карточке */
+.timer-bar .rest-block{background:none;border:none;border-top:1px solid rgba(158,196,255,.18);border-radius:0;margin:10px 0 0;padding:10px 0 0}
+.timer-bar .timer-time{font-size:24px}
+.w-label{display:flex;align-items:center;gap:4px;background:none;border:none;padding:0;margin:0;cursor:pointer;font-family:inherit;
+  font-size:11px;color:#9ec4ff;text-transform:uppercase;letter-spacing:.6px;font-weight:700;text-align:left;max-width:100%}
+.w-label span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w-label .i.sm{width:12px;height:12px;color:#9ec4ff;opacity:.8;margin:0}
+.w-label-btn{background:none;border:none;padding:0;font-family:inherit;cursor:pointer;gap:4px}
+.w-label-btn .i.sm:last-child{opacity:.7}
+
+/* план свёрнут по умолчанию */
+.plan-head{cursor:pointer}
+.plan-fold{display:flex;color:var(--muted)}
+.plan-fold .i{width:18px;height:18px}
+.plan-fold-hint{text-align:center;font-size:13px;color:var(--accent);font-weight:600;padding:8px 0 0;cursor:pointer}
+
+/* отдых внутри формы */
+.form-card .rest-presets{margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+.rest-head{margin:0 0 8px}
+.rest-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.seg.mini{margin:0;padding:2px;flex:none}
+.seg.mini button{padding:6px 9px;font-size:12px;flex:none}
+.seg.mini #autoRestTime{font-variant-numeric:tabular-nums}
+.ar-hint{margin-top:6px;font-size:12px;line-height:1.35}
+.form-card .chip{padding:9px 4px;font-size:14px}
+
+.timer-bar .timer-display{flex:1;min-width:0}
+.timer-bar .timer-row .btn{flex:none}
+.plan-next-row{display:flex;align-items:center;gap:10px;margin-top:10px;padding:9px 12px;border-radius:10px;cursor:pointer;
+  background:rgba(55,194,110,.08);border:1px solid rgba(55,194,110,.35)}
+.plan-next-row:active{opacity:.6}
+.plan-next-row .rec-desc{font-size:13px}
+
+/* заметки + тумблер разминки в одной строке */
+.lbl-row{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:12px 0 5px}
+.lbl-row label{margin:0}
+.warm-btn.sm{width:auto;margin:0;padding:4px 10px 4px 5px;gap:7px;font-size:13px;border-radius:16px}
+.warm-btn.sm .warm-sw{width:30px;height:18px;border-radius:9px}
+.warm-btn.sm .warm-sw::after{width:12px;height:12px;top:3px;left:3px}
+.warm-btn.sm.active .warm-sw::after{transform:translateX(12px)}

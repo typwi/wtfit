@@ -150,7 +150,7 @@ function normalize(d){
         warm: r.warm===undefined ? /^\s*разминк/i.test(r.notes||'') : !!r.warm})),
     workouts: (Array.isArray(d.workouts)?d.workouts:[])
       .filter(w=>w && w.start)
-      .map(w=>({id:+w.id, start:+w.start, end:w.end?+w.end:null, timed:!!w.timed, rest:Math.max(0,+w.rest||0), plan:w.plan?String(w.plan):''})),
+      .map(w=>({id:+w.id, start:+w.start, end:w.end?+w.end:null, timed:!!w.timed, rest:Math.max(0,+w.rest||0), plan:w.plan?String(w.plan):'', planDay:w.planDay?+w.planDay:null})),
     programs: normPrograms(d.programs),
     measures: (Array.isArray(d.measures)?d.measures:[])
       .filter(m=>m && m.k && m.ts && num(m.v))
@@ -702,7 +702,7 @@ function renderLastHint(){
   }
   if(c.plan){
     const pr2=c.plan.it && c.plan.it.rest!=null ? ` · ${restLabel(c.plan.it.rest)}` : '';
-    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · ${esc(c.plan.day)} · <b>${c.plan.done} из ${c.plan.need}</b>${pr2}</div>
+    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · <b>${c.plan.done} из ${c.plan.need}</b>${pr2}</div>
       <button class="btn ghost sm" data-act="fill-plan-ex">Подставить</button></div>
       <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>`;
   }
@@ -783,7 +783,8 @@ function saveRecord(){
     px.d.items.forEach((it,i)=>{ if(it.exId===ex.id && !!it.warm===!!rec.warm && st[i].done>0) k=i; });
     if(k>=0 && px.d.items[k].rest!=null) restSec=px.d.items[k].rest;
   }
-  if(autoRest && DB.active.wId && (reps || weight) && restSec>0){ startRest(restSec, true); autoStarted=true; }
+  if(arMode==='fixed') restSec=lastRest;
+  if(arMode!=='off' && DB.active.wId && (reps || weight) && restSec>0){ startRest(restSec, true); autoStarted=true; }
   renderRecord();
 
   toast((prMsg||(rec.warm?'Разминка сохранена':'Сохранено'))+(autoStarted?` · отдых ${fmtClock(restSec)}`:''), 'Отменить', ()=>{
@@ -851,6 +852,7 @@ function workoutPRs(wId){
 // прошлая «такая же» тренировка: та же программа, иначе с максимальным совпадением упражнений (от половины)
 function similarPrev(w){
   const ws=sortedWorkouts().filter(x=>x.id!==w.id && x.start<w.start && !isActive(x));
+  if(w.planDay){ const same=ws.filter(x=>x.planDay===w.planDay); if(same.length) return same[same.length-1]; }
   if(w.plan){ const same=ws.filter(x=>x.plan===w.plan); if(same.length) return same[same.length-1]; }
   const mine=new Set(recsOfW(w.id).map(r=>r.exId));
   let best=null, bestScore=0;
@@ -891,7 +893,7 @@ function openSummary(wId){
     ${prs.map(x=>`<div class="sum-line">${esc(x.text)}</div>`).join('')}</div>`;
   if(prev){
     const ps=wStats(prev), pd=new Date(prev.start);
-    html+=`<div class="sum-block"><div class="sum-title">Сравнение с ${WD[pd.getDay()]} ${fmtDM(prev.start)}${prev.plan&&prev.plan===w.plan?' (та же тренировка программы)':''}</div>
+    html+=`<div class="sum-block"><div class="sum-title">Сравнение с ${WD[pd.getDay()]} ${fmtDM(prev.start)}${prev.planDay&&prev.planDay===w.planDay?' (тот же день программы)':''}</div>
       ${cmpHtml('Тоннаж', st.ton, ps.ton, v=>v?fmtTon(v):'0', 'up')}
       ${cmpHtml('Подходы', st.sets, ps.sets, v=>String(v), 'up')}
       ${st.dur&&ps.dur?cmpHtml('Длительность', st.dur, ps.dur, v=>fmtDur(v), 'down'):''}
@@ -923,6 +925,26 @@ function tickWorkout(){
   const parts=[`${n} ${plural(n,'запись','записи','записей')}`];
   if(w.rest) parts.push('отдых '+fmtDur(w.rest));
   $('#workoutSub').textContent=parts.join(' · ');
+  const lb=$('#workoutLabel'), txt=w.plan||'Тренировка';
+  if(lb && lb.dataset.t!==txt){ lb.dataset.t=txt; lb.innerHTML=`<span>${esc(txt)}</span>${I('edit','sm')}`; }
+}
+// подпись тренировки: свободный текст, по умолчанию — день программы
+function renameWorkout(id){
+  const w=wById(id); if(!w) return;
+  openModal(`<h2>Подпись тренировки</h2>
+    <input id="wLabel" value="${esc(w.plan||'')}" placeholder="Например: Верх · Сила" autocomplete="off" autocapitalize="sentences" data-enter="w-label-save">
+    <p class="muted" style="margin:8px 2px 0">Видна в статистике и итоге. Пустое поле — без подписи.</p>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn ghost" data-act="close-modal">Отмена</button>
+      <button class="btn" data-act="w-label-save" data-id="${w.id}">Сохранить</button>
+    </div>`);
+  const i=$('#wLabel'); i.focus(); try{ i.setSelectionRange(0,i.value.length); }catch(e){}
+}
+function saveWorkoutLabel(id){
+  const w=wById(id); if(!w){ closeModal(); return; }
+  w.plan=cleanName($('#wLabel').value);
+  save(); closeModal(); renderWorkoutBar(); refresh();
+  toast(w.plan?'Подпись сохранена':'Подпись убрана', null, null, null, 'check');
 }
 
 // тренировка без активности больше 3 часов — скорее всего, забыли нажать «Стоп»
@@ -957,23 +979,28 @@ let rInterval=null;
 /* Автоотдых: после «Сохранить» (во время идущей тренировки) сам запускается отдых
    с последним выбранным временем. Переключатель — над кнопками отдыха. */
 const AUTOREST_KEY='fitness_auto_rest', LASTREST_KEY='fitness_last_rest';
-let autoRest=true, lastRest=120;
+// режим: off — выключен, fixed — всегда последнее выбранное время, plan — время из пункта программы (иначе последнее выбранное)
+let arMode='plan', lastRest=120;
 try{
-  const a=localStorage.getItem(AUTOREST_KEY); if(a!=null) autoRest=a==='1';
+  const a=localStorage.getItem(AUTOREST_KEY);
+  if(a==='0'||a==='off') arMode='off'; else if(a==='fixed') arMode='fixed'; else arMode='plan';
   const l=+localStorage.getItem(LASTREST_KEY); if(l>0) lastRest=l;
 }catch(e){}
 function renderRestPresets(){
-  const cb=$('#autoRest'); if(cb) cb.checked=autoRest;
+  $$('#arSeg button').forEach(b=>b.classList.toggle('active', b.dataset.m===arMode));
   const t=$('#autoRestTime'); if(t) t.textContent=fmtClock(lastRest);
+  const h=$('#arHint');
+  if(h) h.textContent = arMode==='off' ? 'Автоотдых выключен — запускайте отдых кнопками ниже.'
+    : arMode==='fixed' ? `После «Сохранить» всегда ${fmtClock(lastRest)}. Время меняется кнопками ниже.`
+    : `После «Сохранить» — отдых из пункта программы, вне программы — ${fmtClock(lastRest)}.`;
   $$('.rest-presets .chip[data-sec]').forEach(c=>c.classList.toggle('sel', +c.dataset.sec===lastRest));
   const cu=$('.rest-presets .chip[data-act="rest-custom"]');
   if(cu) cu.classList.toggle('sel', ![60,120,180,300].includes(lastRest));
 }
-function setAutoRest(on){
-  autoRest=on;
-  try{ localStorage.setItem(AUTOREST_KEY, on?'1':'0'); }catch(e){}
+function setArMode(m){
+  arMode=m;
+  try{ localStorage.setItem(AUTOREST_KEY, m); }catch(e){}
   renderRestPresets();
-  toast(on ? `Автоотдых включён: ${fmtClock(lastRest)} после каждого сохранения` : 'Автоотдых выключен', null, null, 2500, on?'timer':null);
 }
 function startRest(sec, auto){
   if(!auto){ lastRest=sec; try{ localStorage.setItem(LASTREST_KEY, String(sec)); }catch(e){} renderRestPresets(); }
@@ -1609,8 +1636,8 @@ function openWorkout(id){
   const gaps=buildGaps();
 
   let html=`<div class="sheet-head"><h2>Тренировка #${workoutNumber(id)}</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
-    <div class="muted" style="margin-bottom:${w.plan?4:12}px">${WD[d.getDay()]}, ${fmtDate(w.start)} · ${fmtTime(w.start)}${isActive(w)?' · <span class="badge">идёт</span>':''}</div>
-    ${w.plan?`<div class="workout-plan" style="margin-bottom:12px">${I('clip','sm')}${esc(w.plan)}</div>`:''}
+    <div class="muted" style="margin-bottom:4px">${WD[d.getDay()]}, ${fmtDate(w.start)} · ${fmtTime(w.start)}${isActive(w)?' · <span class="badge">идёт</span>':''}</div>
+    <button class="workout-plan w-label-btn" style="margin-bottom:12px" data-act="w-rename" data-id="${w.id}">${I('clip','sm')}${w.plan?esc(w.plan):'Добавить подпись'}${I('edit','sm')}</button>
     <div class="stats-summary">
       <div class="stats-box"><div class="lbl">${I('clock','sm')}Длительность</div><div class="val">${dur?fmtDur(dur):'—'}</div></div>
       <div class="stats-box"><div class="lbl">${I('pause','sm')}Отдых</div><div class="val">${w.rest?fmtDur(w.rest):'—'}</div></div>
@@ -2440,6 +2467,14 @@ function planStatus(x){
     return {need, done, ok: done>=need, warm:!!it.warm};
   });
 }
+const PLANFOLD_KEY='fitness_plan_folded';
+let planFolded=true;
+try{ planFolded=localStorage.getItem(PLANFOLD_KEY)!=='0'; }catch(e){}
+function togglePlan(){
+  planFolded=!planFolded;
+  try{ localStorage.setItem(PLANFOLD_KEY, planFolded?'1':'0'); }catch(e){}
+  renderPlan();
+}
 function renderPlan(){
   const box=$('#planBox'); if(!box) return;
   const x=planCtx();
@@ -2451,19 +2486,26 @@ function renderPlan(){
   const st=planStatus(x), done=st.filter(s=>s.ok).length, next=st.findIndex(s=>!s.ok);
   const needAll=st.reduce((a,s)=>a+s.need,0), doneAll=st.reduce((a,s)=>a+s.done,0);
   box.innerHTML=`<div class="card plan-card">
-    <div class="plan-head">
+    <div class="plan-head" data-act="plan-toggle">
       <div class="plan-title-wrap"><div class="plan-sub">${esc(x.p.name)} · ${esc(x.f.name)}</div><div class="plan-title">${esc(x.d.name)}</div></div>
       <div class="plan-count">${done}/${st.length}</div>
+      <span class="plan-fold">${I(planFolded?'down':'up')}</span>
       <button class="icon-btn sm" data-act="plan-close" aria-label="Убрать программу">${I('x')}</button>
     </div>
     <div class="progress plan-progress"><div style="width:${needAll?Math.round(doneAll/needAll*100):0}%"></div></div>
-    ${x.d.items.map((it,i)=>{ const e=exById(it.exId);
+    ${planFolded ? '' : x.d.items.map((it,i)=>{ const e=exById(it.exId);
       const s=st[i], part=!s.ok && s.done>0;
       return `<div class="plan-row${s.ok?' done':''}${i===next?' next':''}${it.warm?' warm':''}" data-act="plan-fill" data-i="${i}">
         <span class="plan-mark${part?' part':''}">${s.ok?I('check'):part?`${s.done}/${s.need}`:(i+1)}</span>
         <div class="rec-main"><div class="rec-name">${it.warm?WARM_TAG:''}${esc(e?e.name:'?')}</div>
           <div class="rec-desc">${planDesc(it)}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
       </div>`; }).join('')}
+    ${planFolded && next>=0 ? (()=>{ const it=x.d.items[next], e=exById(it.exId), s2=st[next];
+      return `<div class="plan-next-row" data-act="plan-next" data-i="${next}">
+        <div class="rec-main"><div class="plan-next-lbl">Далее${s2.need>1?` · подход ${s2.done+1} из ${s2.need}`:''}</div>
+          <div class="rec-name">${it.warm?WARM_TAG:''}${esc(e?e.name:'?')}</div>
+          <div class="rec-desc">${planDesc(it)}</div></div>
+        <span class="plan-next-btn">Подставить</span></div>`; })() : ''}
     ${st.length && next<0 ? `<div class="plan-done">${I('flag')}Все упражнения выполнены</div>` : ''}
   </div>`;
 }
@@ -2490,7 +2532,7 @@ function startPlan(dayId){
   if(!DB.active.wId) startWorkout(true);
   DB.active.plan={dayId};
   const w=activeW();
-  if(w) w.plan=`${x.p.name} · ${x.f.name} · ${x.d.name}`;
+  if(w){ w.plan=`${x.f.name} · ${x.d.name}`; w.planDay=x.d.id; }
   save(); closeModal(); go('record');
   toast(`Тренировка «${x.d.name}» началась`, null, null, null, 'play');
 }
@@ -2500,21 +2542,7 @@ function closePlan(){
 }
 // подсказка над полем «Упражнение»: первое невыполненное упражнение программы — подставить одним нажатием
 function renderPlanNext(){
-  const box=$('#planNext'); if(!box) return;
-  const x=planCtx();
-  const st = x ? planStatus(x) : [];
-  const next = st.findIndex(s=>!s.ok);
-  const it = next>=0 ? x.d.items[next] : null;
-  const e = it && exById(it.exId);
-  // уже подставлено (или введено вручную) — подсказка не нужна
-  if(!e || normKey(exInput.value)===normKey(e.name)){ box.innerHTML=''; return; }
-  box.innerHTML=`<div class="plan-next" data-act="plan-next" data-i="${next}">
-    <span class="plan-mark">${next+1}</span>
-    <div class="rec-main"><div class="plan-next-lbl">Следующее по программе${st[next].need>1?` · подход ${st[next].done+1} из ${st[next].need}`:''}</div>
-      <div class="rec-name">${it.warm?WARM_TAG:''}${esc(e.name)}</div>
-      <div class="rec-desc">${planDesc(it)}</div></div>
-    <span class="plan-next-btn">Подставить</span>
-  </div>`;
+  const box=$('#planNext'); if(box) box.innerHTML='';
 }
 function fillFromPlan(i, noScroll){
   const x=planCtx(); if(!x) return;
@@ -3388,6 +3416,11 @@ document.addEventListener('click', e=>{
     case 'w-edit-save':      saveWorkoutEdit(id); break;
     case 'w-del':            deleteWorkout(id); break;
     case 'warm-toggle':      setWarm(!warmOn); break;
+    case 'ar-mode':          setArMode(el.dataset.m); break;
+    case 'plan-toggle':      togglePlan(); break;
+    case 'w-rename':         renameWorkout(id); break;
+    case 'w-rename-active':  if(DB.active.wId) renameWorkout(DB.active.wId); break;
+    case 'w-label-save':     saveWorkoutLabel(id); break;
     case 'fill-chip':        fillChip(el.dataset.src, +el.dataset.i); break;
     case 'fill-plan-ex':     fillFromPlanEx(); break;
     case 'w-summary':        openSummary(id); break;
@@ -3455,7 +3488,6 @@ document.addEventListener('click', e=>{
 
 document.addEventListener('change', e=>{
   const t=e.target;
-  if(t.id==='autoRest'){ setAutoRest(t.checked); return; }
   if(t.id==='importFile') onImportFile(t);
   else if(t.dataset && t.dataset.filter==='ex'){ tblEx=t.value; renderStats(); }
   else if(t.dataset && t.dataset.filter==='period'){ tblPeriod=t.value; renderStats(); }

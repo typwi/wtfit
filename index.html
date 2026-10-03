@@ -66,26 +66,25 @@
     <div class="timer-bar hidden" id="timerBar">
       <div class="timer-row">
         <div class="timer-display">
-          <span class="timer-label">Тренировка</span>
+          <button type="button" class="w-label" id="workoutLabel" data-act="w-rename-active">Тренировка</button>
           <span class="timer-time" id="workoutTime">00:00</span>
           <span class="timer-sub" id="workoutSub"></span>
         </div>
         <button class="btn ghost sm" data-act="timer-stop">Стоп</button>
       </div>
-    </div>
-
-    <div class="rest-block hidden" id="restBlock">
-      <div class="rest-row">
-        <div class="timer-display">
-          <span class="timer-label rest">Отдых</span>
-          <span class="timer-time rest" id="restTime">00:00</span>
+      <div class="rest-block hidden" id="restBlock">
+        <div class="rest-row">
+          <div class="timer-display">
+            <span class="timer-label rest">Отдых</span>
+            <span class="timer-time rest" id="restTime">00:00</span>
+          </div>
+          <div class="rest-btns">
+            <button class="btn ghost sm" data-act="rest-add">+30 с</button>
+            <button class="btn ghost sm" data-act="rest-cancel">Отмена</button>
+          </div>
         </div>
-        <div class="rest-btns">
-          <button class="btn ghost sm" data-act="rest-add">+30 с</button>
-          <button class="btn ghost sm" data-act="rest-cancel">Отмена</button>
-        </div>
+        <div class="progress"><div id="restProgress" style="width:0%"></div></div>
       </div>
-      <div class="progress"><div id="restProgress" style="width:0%"></div></div>
     </div>
 
     <div id="planBox"></div>
@@ -137,33 +136,39 @@
         </div>
       </div>
 
-      <label for="mNotes">Заметки</label>
+      <div class="lbl-row">
+        <label for="mNotes">Заметки</label>
+        <button type="button" class="warm-btn sm" id="warmBtn" data-act="warm-toggle" aria-pressed="false" title="Разминка: не считается рабочим подходом, тоннаж считается">
+          <span class="warm-sw"></span>Разминка
+        </button>
+      </div>
       <div class="note-row">
         <div class="autocomplete"><input id="mNotes" data-notes="1" data-ex="exInput" placeholder="необязательно" autocomplete="off" autocorrect="off" enterkeyhint="done"><div class="suggest note-suggest"></div></div>
         <button type="button" class="icon-btn note-toggle" data-act="notes-toggle" aria-label="Подсказки заметок"><svg class="i ic-search" aria-hidden="true"><use href="#i-search"></use></svg></button>
       </div>
 
-      <button type="button" class="warm-btn" id="warmBtn" data-act="warm-toggle" aria-pressed="false">
-        <span class="warm-sw"></span>Разминка<span class="warm-hint">не считается рабочим подходом, тоннаж — считается</span>
-      </button>
-
       <div class="form-actions">
         <button class="btn ghost" data-act="clear-form">Очистить</button>
         <button class="btn ok" data-act="save"><svg class="i ic-save" aria-hidden="true"><use href="#i-save"></use></svg>Сохранить</button>
       </div>
-    </div>
 
-    <div class="rest-presets">
-      <div class="rest-head">
-        <span class="muted">Отдых:</span>
-        <label class="auto-rest"><input type="checkbox" id="autoRest"> авто после «Сохранить» · <span id="autoRestTime">2:00</span></label>
-      </div>
-      <div class="chips">
-        <div class="chip" data-act="rest" data-sec="60">1:00</div>
-        <div class="chip" data-act="rest" data-sec="120">2:00</div>
-        <div class="chip" data-act="rest" data-sec="180">3:00</div>
-        <div class="chip" data-act="rest" data-sec="300">5:00</div>
-        <div class="chip" data-act="rest-custom">Своё…</div>
+      <div class="rest-presets">
+        <div class="rest-head">
+          <span class="rest-title">Отдых</span>
+          <div class="seg mini" id="arSeg">
+            <button type="button" data-act="ar-mode" data-m="off">Выкл</button>
+            <button type="button" data-act="ar-mode" data-m="fixed">Всегда <span id="autoRestTime">2:00</span></button>
+            <button type="button" data-act="ar-mode" data-m="plan">По программе</button>
+          </div>
+        </div>
+        <div class="chips">
+          <div class="chip" data-act="rest" data-sec="60">1:00</div>
+          <div class="chip" data-act="rest" data-sec="120">2:00</div>
+          <div class="chip" data-act="rest" data-sec="180">3:00</div>
+          <div class="chip" data-act="rest" data-sec="300">5:00</div>
+          <div class="chip" data-act="rest-custom">Своё…</div>
+        </div>
+        <div class="muted ar-hint" id="arHint"></div>
       </div>
     </div>
 
