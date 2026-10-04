@@ -650,3 +650,19 @@ label.check.pi-warm{margin:0 0 10px;font-size:14px}
 .pi-src button{border:1px solid var(--border);background:var(--card);color:var(--muted);border-radius:8px;padding:5px 8px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
 .pi-src button.active{border-color:rgba(180,140,255,.6);background:rgba(180,140,255,.14);color:#c9b0ff}
 .pi-btn{width:28px}
+
+/* тест 1ПМ, прогрессия, шаг веса */
+.lbl-btns{display:flex;gap:6px;flex:none}
+.test-btn.active{border-color:#b48cff;background:rgba(180,140,255,.12)}
+.test-btn.active .warm-sw{background:#b48cff}
+.test-tag{display:inline-block;font-size:11px;font-weight:700;color:#c9b0ff;background:rgba(180,140,255,.16);border-radius:5px;padding:1px 6px;margin-right:4px}
+.up-lbl{color:var(--ok);font-weight:700;white-space:nowrap}
+.pi-src-hint{font-size:11px;color:var(--muted);margin:-4px 0 8px}
+.pi-row2{flex-wrap:wrap}
+.pi-row2 .pi-rest{flex:0 0 78px}
+.pi-checks{display:flex;flex-direction:column;gap:2px;margin-bottom:4px}
+.pi-checks label.check{margin:0;font-size:13px}
+.pi-checks label.check input{width:18px;height:18px}
+.step-seg{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px}
+.step-seg button{flex:1 0 46px;border:1px solid var(--border);background:var(--card2);color:var(--txt);border-radius:9px;padding:9px 4px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer}
+.step-seg button.active{border-color:var(--accent);background:rgba(79,140,255,.16);color:#9ec4ff}

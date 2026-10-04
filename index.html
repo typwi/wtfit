@@ -141,9 +141,14 @@
 
       <div class="lbl-row">
         <label for="mNotes">Заметки</label>
-        <button type="button" class="warm-btn sm" id="warmBtn" data-act="warm-toggle" aria-pressed="false" title="Разминка: не считается рабочим подходом, тоннаж считается">
-          <span class="warm-sw"></span>Разминка
-        </button>
+        <div class="lbl-btns">
+          <button type="button" class="warm-btn sm test-btn" id="testBtn" data-act="test-toggle" aria-pressed="false" title="Тест 1ПМ: подход на максимум перезапишет 1ПМ">
+            <span class="warm-sw"></span>Тест 1ПМ
+          </button>
+          <button type="button" class="warm-btn sm" id="warmBtn" data-act="warm-toggle" aria-pressed="false" title="Разминка: не считается рабочим подходом, тоннаж считается">
+            <span class="warm-sw"></span>Разминка
+          </button>
+        </div>
       </div>
       <div class="note-row">
         <div class="autocomplete"><input id="mNotes" data-notes="1" data-ex="exInput" placeholder="необязательно" autocomplete="off" autocorrect="off" enterkeyhint="done"><div class="suggest note-suggest"></div></div>
