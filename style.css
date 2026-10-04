@@ -762,3 +762,5 @@ button.pct-btn:active{opacity:.6}
 /* заметка пункта программы с лупой подсказок */
 .pi-note-row .icon-btn.note-toggle{min-height:40px;width:42px}
 .pi-note-row .pi-notes{width:100%}
+/* «Свой вес» */
+.bw-seg{margin:12px 0 6px}
