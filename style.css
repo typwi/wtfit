@@ -413,7 +413,7 @@ input[type=date]{min-height:48px;display:block;text-align:left}
 .pi-btn{flex:none;width:32px;height:40px;background:none;border:none;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
 .pi-btn:disabled{opacity:.25}
 .pi-btn:active{opacity:.5}
-.pi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
+.pi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0 6px}
 label.pi-l{margin:0;text-transform:none;letter-spacing:0;font-size:11px;font-weight:600;text-align:center}
 .pi-l input{margin-top:3px;padding:9px 4px;text-align:center;background:var(--card)}
 .pi-notes{background:var(--card);padding:9px 12px}
@@ -536,9 +536,6 @@ label.auto-rest{display:flex;align-items:center;gap:6px;margin:0;text-transform:
 .rest-lbl{white-space:nowrap;color:#ffcf80}
 .rest-lbl .i.sm{width:12px;height:12px;margin:0 2px 0 4px;color:var(--warn)}
 .plan-row.warm .plan-mark{background:rgba(255,138,92,.16);color:#ffb08f}
-.pi-row2{display:flex;align-items:flex-end;gap:10px;margin:0 0 8px}
-.pi-rest{flex:0 0 90px}
-label.check.pi-warm{margin:0 0 10px;font-size:14px}
 
 /* «Запись»: тренировка и отдых в одной карточке */
 .timer-bar .rest-block{background:none;border:none;border-top:1px solid rgba(158,196,255,.18);border-radius:0;margin:10px 0 0;padding:10px 0 0}
@@ -657,12 +654,30 @@ label.check.pi-warm{margin:0 0 10px;font-size:14px}
 .test-btn.active .warm-sw{background:#b48cff}
 .test-tag{display:inline-block;font-size:11px;font-weight:700;color:#c9b0ff;background:rgba(180,140,255,.16);border-radius:5px;padding:1px 6px;margin-right:4px}
 .up-lbl{color:var(--ok);font-weight:700;white-space:nowrap}
-.pi-src-hint{font-size:11px;color:var(--muted);margin:-4px 0 8px}
-.pi-row2{flex-wrap:wrap}
-.pi-row2 .pi-rest{flex:0 0 78px}
-.pi-checks{display:flex;flex-direction:column;gap:2px;margin-bottom:4px}
-.pi-checks label.check{margin:0;font-size:13px}
-.pi-checks label.check input{width:18px;height:18px}
 .step-seg{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px}
 .step-seg button{flex:1 0 46px;border:1px solid var(--border);background:var(--card2);color:var(--txt);border-radius:9px;padding:9px 4px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer}
 .step-seg button.active{border-color:var(--accent);background:rgba(79,140,255,.16);color:#9ec4ff}
+
+/* редактор пункта: основное сразу, остальное под «Ещё ▾» */
+.pi-calc{display:block;margin-top:3px;font-size:11px;font-weight:600;color:#c9b0ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi-more{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;padding:4px 2px;margin:0;cursor:pointer;
+  font-family:inherit;text-align:left;min-height:28px}
+.pi-more-l{flex:none;display:flex;align-items:center;gap:2px;font-size:13px;font-weight:600;color:var(--accent)}
+.pi-more-l .i{width:15px;height:15px;color:var(--accent);transition:transform .15s}
+.pi-more-sum{flex:1;min-width:0;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi-more:active{opacity:.6}
+.pi-extra{display:none;padding-top:6px;margin-top:2px;border-top:1px dashed var(--border)}
+.pi.open .pi-extra{display:block}
+.pi.open .pi-more-sum{display:none}
+.pi.open .pi-more-l .i{transform:rotate(180deg)}
+.pi-extra .pi-src{margin:2px 0 4px}
+.pi-hint{font-size:11px;color:var(--muted);margin:0 2px 8px;line-height:1.35}
+.pi-checks{display:flex;gap:18px;flex-wrap:wrap;margin:0 2px 8px}
+.pi-checks label.check{margin:0;font-size:14px}
+.pi-checks label.check input{width:18px;height:18px}
+
+/* окно 1ПМ: текущий */
+.orm-cur{margin-top:10px;padding:12px;border-radius:12px;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.28)}
+.orm-cur-lbl{font-size:11px;font-weight:700;color:#9ec4ff;text-transform:uppercase;letter-spacing:.5px}
+.orm-cur-v{font-size:22px;font-weight:800;margin:2px 0;font-variant-numeric:tabular-nums}
+.orm-cur-src{font-size:13px;color:var(--muted);line-height:1.35}
