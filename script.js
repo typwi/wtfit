@@ -2019,6 +2019,8 @@ function notesField(id, value, exRef){
     </div>`;
 }
 function noteExName(inp){
+  const pi=inp.closest && inp.closest('.pi');                 // редактор программы: упражнение — в своём пункте
+  if(pi){ const n=pi.querySelector('.pi-name'); return n ? n.value : ''; }
   const ref=inp.dataset.ex && document.getElementById(inp.dataset.ex);
   if(!ref) return '';
   if(ref.tagName==='SELECT'){ const e=exById(+ref.value); return e ? e.name : ''; }
@@ -2039,6 +2041,14 @@ function renderNoteSuggest(inp){
     if(!x){ x={text:cleanName(r.notes), n:0, nEx:0, last:0}; m.set(k,x); }
     x.n++; if(r.exId===exId) x.nEx++;
     if(r.ts>x.last){ x.last=r.ts; x.text=cleanName(r.notes); }
+  });
+  // заметки из пунктов программ — тоже в подсказках
+  forEachItem(it=>{
+    if(!it.notes) return;
+    const k=normKey(it.notes);
+    let x=m.get(k);
+    if(!x){ x={text:cleanName(it.notes), n:0, nEx:0, last:0}; m.set(k,x); }
+    x.n++; if(it.exId===exId) x.nEx++;
   });
   let list=[...m.entries()].filter(([k])=> q ? (k.includes(q) && k!==q) : true).map(([k,x])=>Object.assign({k},x));
   if(!q && exId) list=list.filter(x=>x.nEx>0);                 // пустое поле — только заметки к этому упражнению
@@ -3339,7 +3349,10 @@ function piHtml(it, i, n){
           <label class="check"><input type="checkbox" class="pi-warmv"${it.warm?' checked':''}>Разминка</label>
           <label class="check"><input type="checkbox" class="pi-testv"${it.test?' checked':''}>Тест 1ПМ</label>
         </div>
-        <input class="pi-notes" value="${esc(it.notes)}" placeholder="Заметка (необязательно)" autocomplete="off">
+        <div class="note-row pi-note-row">
+          <div class="autocomplete"><input class="pi-notes" data-notes="1" value="${esc(it.notes)}" placeholder="Заметка (необязательно)" autocomplete="off" autocorrect="off" enterkeyhint="done"><div class="suggest note-suggest"></div></div>
+          <button type="button" class="icon-btn note-toggle${notesOn?' active':''}" data-act="notes-toggle" aria-label="Подсказки заметок">${I('search')}</button>
+        </div>
       </div>
     </div>`;
 }

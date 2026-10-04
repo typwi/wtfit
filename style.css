@@ -759,3 +759,6 @@ button.pct-btn:active{opacity:.6}
 /* раскрытая заметка — с новой строки и на всю ширину */
 .hint-meta{flex-wrap:wrap;row-gap:2px}
 .hint-meta .hint-note-line.open{flex:0 0 100%;width:100%}
+/* заметка пункта программы с лупой подсказок */
+.pi-note-row .icon-btn.note-toggle{min-height:40px;width:42px}
+.pi-note-row .pi-notes{width:100%}
