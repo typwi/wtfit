@@ -1145,6 +1145,8 @@ function saveRecord(){
   if(rec.t1){
     const v=round(curOrm(ex.id),1);
     testMsg=`Текущий 1ПМ ≈ ${fmtNum(v)} кг${curBefore?` (был ${fmtNum(round(curBefore,1))})`:''}${reps>10?' · много повторов, расчёт приблизительный':''}`;
+    // тест — это свежий замер: пункты «%» с ручного переходят на текущий (даже если 1ПМ стал меньше)
+    if(testToCurrent(ex.id)) testMsg+=' · пункты «%» — от текущего';
     if(refreezeEx(ex.id)) testMsg+=' · веса программы пересчитаны';
   }
   save();
@@ -2137,6 +2139,7 @@ function saveRecEdit(id){
   if(Math.floor(ts/60000)!==Math.floor(r.ts/60000)){ r.ts=ts; reattach(r); }
   // правка теста меняет текущий 1ПМ — пересчитать невыполненные пункты «%» идущей тренировки
   let re=false;
+  if(!was.test && isTestRec(r)) testToCurrent(r.exId);
   if(was.test || isTestRec(r)){ re=refreezeEx(r.exId); if(was.exId!==r.exId) re=refreezeEx(was.exId)||re; }
   cleanupWorkouts(); save();
   afterRecEdit();
@@ -2470,7 +2473,7 @@ function saveRecAdd(wId){
   if(t1) vals.t1=true;
   const ex=getOrCreateEx(name);
   DB.records.push(Object.assign({id:nid('rec'), exId:ex.id, wId:w.id, ts}, vals));
-  if(t1) refreezeEx(ex.id);
+  if(t1){ testToCurrent(ex.id); refreezeEx(ex.id); }
   // время записи за пределами замеренной тренировки — расширяем её границы
   if(!isActive(w) && w.timed && w.end){
     if(ts<w.start) w.start=ts;
@@ -3604,7 +3607,13 @@ function fillFirstPlanItem(){
   const i=planNextIdx(x, planStatus(x));
   if(i>=0) fillFromPlan(i, true);
 }
-function closePlan(){
+// после теста ручной 1ПМ больше не нужен: все пункты «%» упражнения — от текущего (сам ручной остаётся в истории)
+function testToCurrent(exId){
+  if(!pctItemsOf(exId).some(it=>it.src==='m')) return false;
+  return setOrmSrc(exId, 'c');
+}
+async function closePlan(){
+  if(DB.active.wId && !await ask('Убрать программу с экрана? Тренировка продолжится, но подсказки и автоподстановка по программе пропадут.','Убрать')) return;
   DB.active.plan=null; save(); renderPlan();
   toast('Программа скрыта — тренировка продолжается');
 }
