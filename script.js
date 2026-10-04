@@ -837,10 +837,13 @@ function hintCtx(ex){
       const nk=planNextIdx(x, st, ex.id);
       let nextChip=chips.findIndex(c=>!c.done && c.k===nk);
       if(nextChip<0) nextChip=chips.findIndex(c=>!c.done);
+      // нажали на чип — «делаю этот»: точка, отдых и заметка — по нему
+      const sel=chipSel && chipSel.exId===ex.id ? chipSel : null;
+      if(sel && sel.src==='plan' && chips[sel.i] && chips[sel.i].k===sel.k) nextChip=sel.i;
       const work=idx.filter(k=>!x.d.items[k].warm);
       const need=work.reduce((a,k)=>a+st[k].need,0), wdone=work.reduce((a,k)=>a+st[k].done,0);
       const curK = nextChip>=0 ? chips[nextChip].k : idx[idx.length-1];
-      plan={day:x.d.name, tmp:!!x.tmp, chips, next:nextChip, need, done:wdone,
+      plan={day:x.d.name, tmp:!!x.tmp, chips, next:(sel && sel.src!=='plan') ? -1 : nextChip, need, done:wdone,
         it: nextChip>=0 ? chips[nextChip].it : planItem(x, idx[idx.length-1]),
         note: cleanName(x.d.items[curK].notes), rest: x.d.items[curK].rest};
     }
@@ -871,12 +874,20 @@ function fillFromPlanEx(){
   fillSet(c.plan.it, c.plan.it.warm);
 }
 // нажатие на конкретный подход
+/* Нажатый чип — «делаю этот подход»: зелёная точка переезжает на него, строка «отдых · заметка» —
+   его пункта, и после «Сохранить» отдых запускается по нему. Сбрасывается после сохранения,
+   «Очистить», смены упражнения и подстановки из карточки программы. */
+let chipSel=null;              // {exId, src:'plan'|'prev'|'warm', i — номер чипа, k — пункт программы}
 function fillChip(src, i){
   const ex=exByName(exInput.value); if(!ex) return;
   const c=hintCtx(ex);
-  if(src==='warm') fillSet(c.prevWarm[i], true);
-  else if(src==='plan'){ const ch=c.plan && c.plan.chips[i]; if(ch) fillSet(ch.it, ch.warm); }
-  else fillSet(c.prevSets[i]);
+  let r=null, warm=false, k=null;
+  if(src==='warm'){ r=c.prevWarm[i]; warm=true; }
+  else if(src==='plan'){ const ch=c.plan && c.plan.chips[i]; if(ch){ r=ch.it; warm=ch.warm; k=ch.k; } }
+  else r=c.prevSets[i];
+  if(!r) return;
+  chipSel={exId:ex.id, src, i, k};
+  fillSet(r, warm);
 }
 /* Тумблер «Разминка»: такие подходы не считаются рабочими (счётчики «N из M», план, рекорды, 1ПМ),
    но входят в тоннаж. Остаётся включённым для следующего подхода, сбрасывается при смене упражнения. */
@@ -895,6 +906,7 @@ function clearForm(withName){
   NUM_FIELDS.forEach(id=>$('#'+id).value='');
   $('#mNotes').value='';
   setWarm(false); setTest(false);
+  chipSel=null;
   if(withName){ exInput.value=''; renderLastHint(); renderPlanNext(); }
 }
 /* ---- пределы ввода ---- */
@@ -1015,6 +1027,7 @@ function renderLastHint(){
   const box=$('#lastHint');
   const ex=exByName(exInput.value);
   if(!ex){ box.innerHTML=''; updateTopSave(); return; }
+  if(chipSel && chipSel.exId!==ex.id) chipSel=null;
   const c=hintCtx(ex);
   if(!c.prev && !c.today && !c.plan){
     box.innerHTML = prevOpen ? `<div class="hint-card"><div class="muted">Прошлый раз · записей по «${esc(ex.name)}» ещё нет</div></div>` : '';
@@ -1025,7 +1038,8 @@ function renderLastHint(){
     return `<button type="button" class="auto-sw${on?' active':''}" data-act="auto-src" data-src="${src}" aria-pressed="${on}"><span class="warm-sw"></span>авто</button>`; };
   let html='';
   if(c.prev && prevOpen){
-    const n=c.cur ? prevNextIdx(c) : {warm:null,i:-1};
+    const n = chipSel ? (chipSel.src==='plan' ? {warm:null,i:-1} : {warm:chipSel.src==='warm', i:chipSel.i})
+                      : (c.cur ? prevNextIdx(c) : {warm:null,i:-1});
     html+=`<div class="hint-row"><button type="button" class="hint-lbl prev-lbl" data-act="prev-toggle" aria-expanded="true">Прошлый раз · ${relDay(c.prev.recs[0].ts)}${c.cur?` · сегодня <b>${c.done} из ${c.prevSets.length}</b>`:''}${I('up','sm')}</button>${sw('prev')}</div>
       <div class="hint-sets">${
         c.prevWarm.map((r,i)=>chip(r,i,' warm'+(i<c.warmDone?' done':'')+(n.warm===true&&i===n.i?' next':''),'warm')).join('')
@@ -1144,13 +1158,16 @@ function saveRecord(){
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   try{ navigator.vibrate && navigator.vibrate(30); }catch(e){}
   // автоотдых — только во время идущей тренировки и не для кардио «по времени»
+  const sel = chipSel && chipSel.exId===ex.id && chipSel.src==='plan' ? chipSel : null;
+  chipSel=null;
   let autoStarted=false;
   let restSec=lastRest;
   const px=planCtx();
   if(px){
-    // пункт программы, в который засчитан этот подход; все пункты уже закрыты — последний пункт этого упражнения и типа
-    const st=planStatus(px);
-    let k=st.byRec.has(rec.id) ? st.byRec.get(rec.id) : -1;
+    // пункт программы: нажатый чип; иначе тот, в который засчитан подход; все закрыты — последний пункт этого упражнения и типа
+    const st=planStatus(px), si=sel && px.d.items[sel.k];
+    let k = (si && si.exId===ex.id && !!si.warm===!!rec.warm) ? sel.k : -1;
+    if(k<0) k=st.byRec.has(rec.id) ? st.byRec.get(rec.id) : -1;
     if(k<0) px.d.items.forEach((it,i)=>{ if(it.exId===ex.id && !!it.warm===!!rec.warm && st[i].done>0) k=i; });
     if(k>=0 && px.d.items[k].rest!=null) restSec=px.d.items[k].rest;
   }
@@ -3537,6 +3554,11 @@ function fillFromPlan(i, noScroll){
   const it=planItem(x, i); if(!it) return;
   const e=exById(it.exId);
   exInput.value=e ? e.name : '';
+  // выбран пункт из карточки программы — точка на его первом несделанном подходе
+  chipSel=null;
+  if(e){ const c=hintCtx(e), ch=c.plan ? c.plan.chips : [];
+    let j=ch.findIndex(q=>q.k===i && !q.done); if(j<0) j=ch.findIndex(q=>q.k===i);
+    if(j>=0) chipSel={exId:e.id, src:'plan', i:j, k:i}; }
   lastExKey=normKey(exInput.value); setWarm(!!it.warm); setTest(!!it.test && !it.warm);
   // подходы записываются по одному: в поле «Подходы» — 1, счётчик «подход k из n» — в подсказке
   setVal('mWeight',it.weight); setVal('mReps',it.reps); setVal('mSets', (it.weight||it.reps) ? 1 : null);
