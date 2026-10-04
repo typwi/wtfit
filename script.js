@@ -147,7 +147,7 @@ function normalize(d){
         // у «своего веса» доп. вес ручного 1ПМ может быть 0 или минус
         if(e.orm && isFinite(+e.orm.w) && e.orm.w!=null && e.orm.w!=='' && num(e.orm.r)) o.orm={w:round(+e.orm.w,3), r:Math.round(num(e.orm.r)), ts:+e.orm.ts||Date.now()};
         if(num(e.step)>0 && num(e.step)<=50) o.step=num(e.step);
-        if(+e.bw===1 || +e.bw===0.65) o.bw=+e.bw;                  // «свой вес»: доля веса тела в нагрузке
+        if(+e.bw>=0.05 && +e.bw<=1.5) o.bw=round(+e.bw,3);         // «свой вес»: доля веса тела в нагрузке
         if(o.orm && num(e.orm.b)) o.orm.b=num(e.orm.b);
         if(Array.isArray(e.ormHist)) o.ormHist=e.ormHist.filter(h=>h && h.w!=null && isFinite(+h.w) && num(h.r)).slice(-20)
           .map(h=>Object.assign({w:round(+h.w,3), r:Math.round(num(h.r)), ts:+h.ts||0, src:String(h.src||'manual')}, num(h.b)?{b:num(h.b)}:{}));
@@ -300,8 +300,8 @@ function wById(id){ return DB.workouts.find(w=>w.id===id); }
 function isActive(w){ return !!w && DB.active.wId===w.id; }
 function activeW(){ return DB.active.wId ? wById(DB.active.wId) : null; }
 function recsOfW(wId){ return DB.records.filter(r=>r.wId===wId).sort((a,b)=>a.ts-b.ts); }
-/* «Свой вес»: у упражнения с тумблером в поле веса — доп. вес (может быть минус — помощь гравитрона),
-   а нагрузка = вес тела × доля (100% подтягивания/брусья, 65% отжимания) + доп. вес. Вес тела — из замеров,
+/* «Свой вес»: у упражнения с тумблером в поле веса — вес на поясе (может быть минус — помощь гравитрона),
+   а нагрузка = собственный вес × процент (100% подтягивания/брусья, 65% отжимания, или свой) + вес. Вес тела — из замеров,
    запоминается в подходе при сохранении (r.bw), чтобы история не менялась от новых замеров. */
 function exBw(exId){ const e=exById(exId); return e && e.bw ? e.bw : 0; }
 function bodyAt(ts){
@@ -1065,9 +1065,9 @@ function togglePrev(){
 function renderWStep(){
   const el=$('#wStepLbl'); if(!el) return;
   const ex=exByName(exInput.value), st=ex ? exStep(ex.id) : 2.5, bw=ex && ex.bw;
-  const lab=el.parentElement; if(lab && lab.firstChild && lab.firstChild.nodeType===3) lab.firstChild.nodeValue = bw ? 'Доп. вес (кг)' : 'Вес (кг)';
+  const lab=el.parentElement; if(lab && lab.firstChild && lab.firstChild.nodeType===3) lab.firstChild.nodeValue = 'Вес (кг)';
   const b=bw ? bodyNow() : 0;
-  el.textContent = (st!==2.5 ? ` · шаг ${fmtNum(st)}` : '') + (bw ? (b ? ` · тело ${fmtNum(b)}` : ' · нет веса тела') : '');
+  el.textContent = (st!==2.5 ? ` · шаг ${fmtNum(st)}` : '') + (bw ? (b ? ` · соб.вес ${fmtNum(b)}` : ' · нет соб.веса') : '');
 }
 function renderLastHint(){
   renderWStep();
@@ -1179,7 +1179,7 @@ function saveRecord(){
   const wId=DB.active.wId || workoutFor(ts);
   const rec={id:nid('rec'), exId:ex.id, wId, ts, reps, sets, weight, time, notes, warm:warmOn};
   let bwMsg='';
-  if(exBw(ex.id)){ const b=bodyNow(); if(b) rec.bw=b; else bwMsg='Вес тела не записан — нагрузка без него (Замеры → Вес тела)'; }
+  if(exBw(ex.id)){ const b=bodyNow(); if(b) rec.bw=b; else bwMsg='Собственный вес не записан — нагрузка без него (Замеры → Вес тела)'; }
   // тест 1ПМ: этот подход становится текущим 1ПМ упражнения (сам по записи — отмена/правка/удаление работают сразу)
   let testMsg='', curBefore=0;
   if(testOn && !warmOn){
@@ -1923,7 +1923,7 @@ function openOrmEdit(exIdOrName, back){
     <div class="section-head"><span>Ручной 1ПМ</span><span class="muted">необязательно</span></div>
     <p class="muted" style="margin:0 2px 2px">Свой 1ПМ — если текущий по записям ещё не дотягивает до реального или хочется взять с запасом. После «Сохранить» все пункты «%» этого упражнения считаются от ручного. Укажите вес и максимум повторов с ним (точнее — до 8).</p>
     <div class="grid2">
-      <div><label for="ormW">${ex && ex.bw ? 'Доп. вес, кг' : 'Вес, кг'}</label><input id="ormW" inputmode="decimal" value="${m?esc(inVal(m.w)):''}" placeholder="${c.rec?esc(inVal(c.rec.weight)):'0'}"></div>
+      <div><label for="ormW">Вес, кг</label><input id="ormW" inputmode="decimal" value="${m?esc(inVal(m.w)):''}" placeholder="${c.rec?esc(inVal(c.rec.weight)):'0'}"></div>
       <div><label for="ormR">Повторы на максимум</label><input id="ormR" inputmode="numeric" value="${m?m.r:''}" placeholder="${c.rec?Math.min(Math.round(c.rec.reps),10):'5'}"></div>
     </div>
     <div class="orm-preview" id="ormPrev" data-ex="${ex?ex.id:''}">${m?`Ручной 1ПМ ≈ <b>${fmtNum(round(manualOrm(ex.id),1))} кг</b>`:'1ПМ появится после ввода'}</div>
@@ -1980,7 +1980,7 @@ function ormPreview(){
   const el=$('#ormPrev'); if(!el) return;
   const k=exBw(+el.dataset.ex), b=k ? bodyNow() : 0, wi=num($('#ormW')&&$('#ormW').value), r=num($('#ormR')&&$('#ormR').value);
   const w=(wi||0)+b*k;
-  if(w>0 && r && r>=1 && r<=50) el.innerHTML=`Ручной 1ПМ ≈ <b>${fmtNum(round(e1rm(w,Math.round(r)),1))} кг</b>${k&&b?` · с весом тела ${fmtNum(b)}`:''}${r>12?' · много повторов — расчёт приблизительный':r>8?' · больше 8 повторов — расчёт грубее':''}`;
+  if(w>0 && r && r>=1 && r<=50) el.innerHTML=`Ручной 1ПМ ≈ <b>${fmtNum(round(e1rm(w,Math.round(r)),1))} кг</b>${k&&b?` · с соб.весом ${fmtNum(b)}`:''}${r>12?' · много повторов — расчёт приблизительный':r>8?' · больше 8 повторов — расчёт грубее':''}`;
   else el.textContent = r>50 ? 'Слишком много повторов' : '1ПМ появится после ввода';
 }
 document.addEventListener('input', e=>{ if(e.target.id==='ormW'||e.target.id==='ormR') ormPreview(); });
@@ -2373,37 +2373,48 @@ function openExMenu(){
     <button class="btn ghost big" data-act="ex-rename">${I('edit')}Переименовать</button>
     <button class="btn ghost big" data-act="orm-edit" data-id="${ex.id}">${I('trophy')}1ПМ${(c=>c?` · текущий ≈ ${fmtNum(round(c,1))} кг`:'')(curOrm(ex.id))}</button>
     <button class="btn ghost big" data-act="ex-step-menu">${I('dumbbell')}Шаг веса · ${fmtNum(ex.step||2.5)} кг</button>
-    <button class="btn ghost big" data-act="ex-bw-menu" data-id="${ex.id}">${I('trophy')}Свой вес · ${ex.bw ? Math.round(ex.bw*100)+'% тела' : 'выкл'}</button>
+    <button class="btn ghost big" data-act="ex-bw-menu" data-id="${ex.id}">${I('trophy')}Свой вес · ${ex.bw ? fmtNum(round(ex.bw*100,1))+'%' : 'выкл'}</button>
     <button class="btn danger big" data-act="ex-del">${I('trash')}Удалить упражнение</button>
     <button class="btn ghost big" data-act="close-modal">Отмена</button>`);
 }
-/* Тумблер «Свой вес» у упражнения: выкл / 100% (подтягивания, брусья) / 65% (отжимания от пола) */
+/* «Свой вес» у упражнения: выкл / 100% (подтягивания, брусья) / 65% (отжимания) / свой процент.
+   Собственный вес берётся из замеров «Вес тела» — меняется там же. */
 function openBwSheet(id){
   const ex=exById(id); if(!ex) return;
   const bm=DB.measures.filter(m=>m.k==='weight').sort((a,b)=>a.ts-b.ts), last=bm[bm.length-1], cur=ex.bw||0;
-  const btn=(v,l)=>`<button type="button" class="${cur===v?'active':''}" data-act="ex-bw" data-id="${id}" data-v="${v}">${l}</button>`;
+  const custom=cur && cur!==1 && cur!==0.65;
+  const btn=(v,l,on)=>`<button type="button" class="${on?'active':''}" data-act="ex-bw" data-id="${id}" data-v="${v}">${l}</button>`;
   openModal(`<div class="sheet-head"><h2>Свой вес · ${esc(ex.name)}</h2>${closeX()}</div>
-    <p class="muted">В поле веса пишется доп. вес (минус — помощь гравитрона), а 1ПМ, тоннаж, рекорды и «% 1ПМ» в программе считаются от полной нагрузки: вес тела × доля + доп. вес.</p>
-    <div class="seg bw-seg">${btn(0,'Выкл')}${btn(1,'100% тела')}${btn(0.65,'65% тела')}</div>
+    <p class="muted">В поле «Вес» — то, что вешаешь на пояс (минус — помощь гравитрона). 1ПМ, тоннаж, рекорды и «% 1ПМ» в программе считаются от полной нагрузки: собственный вес × процент + вес.</p>
+    <div class="seg bw-seg">${btn(0,'Выкл',!cur)}${btn(1,'100%',cur===1)}${btn(0.65,'65%',cur===0.65)}${btn('c','Свой',custom)}</div>
     <p class="muted" style="margin:0 2px">100% — подтягивания, брусья · 65% — отжимания от пола</p>
-    <label for="bwBody">Вес тела, кг</label>
-    <div class="grid2"><input id="bwBody" inputmode="decimal" value="${last?esc(inVal(last.v)):''}" placeholder="например, 80" data-enter="bw-body-save">
-      <button class="btn" data-act="bw-body-save" data-id="${id}">Записать</button></div>
-    <p class="muted" style="margin:6px 2px 0">${last?`Последний замер — ${fmtDate(last.ts)}. Обновляйте вес в «Замерах»: подходы запоминают вес тела на момент записи.`:'Замера веса тела ещё нет — без него нагрузка считается только по доп. весу.'}</p>`);
+    <div class="bw-custom${custom?'':' hidden'}" id="bwCustom">
+      <label for="bwPct">Свой процент собственного веса</label>
+      <div class="grid2"><input id="bwPct" inputmode="decimal" value="${custom?esc(inVal(round(cur*100,1))):''}" placeholder="например, 70" data-enter="bw-pct-save">
+        <button class="btn" data-act="bw-pct-save" data-id="${id}">Применить</button></div>
+    </div>
+    <div class="bw-body">
+      <div><div class="muted">Собственный вес</div><div class="bw-body-v">${last?fmtNum(last.v)+' кг':'не записан'}</div>
+        <div class="muted">${last?'замер '+fmtDate(last.ts):'без него считается только вес в поле'}</div></div>
+      <button class="btn ghost" data-act="bw-to-measure">${I('edit')}${last?'Изменить':'Записать'} в замерах</button>
+    </div>`);
 }
 function setExBw(id, v){
   const ex=exById(id); if(!ex) return;
-  if(v===1 || v===0.65) ex.bw=v; else delete ex.bw;
+  if(v==='c'){ const b=$('#bwCustom'); if(b){ b.classList.remove('hidden'); $('#bwPct').focus(); } return; }
+  v=+v;
+  if(v>=0.05 && v<=1.5) ex.bw=round(v,3); else delete ex.bw;
   refreezeEx(id); save();
-  toast(ex.bw ? `${ex.name}: учитывается ${Math.round(ex.bw*100)}% веса тела` : `${ex.name}: свой вес не учитывается`, null, null, 2500, 'check');
+  toast(ex.bw ? `${ex.name}: учитывается ${fmtNum(round(ex.bw*100,1))}% собственного веса` : `${ex.name}: собственный вес не учитывается`, null, null, 2500, 'check');
   openBwSheet(id); renderWStep(); refresh();
 }
-function saveBwBody(id){
-  const inp=$('#bwBody'), v=mValOk(inp);
-  if(!v){ markBad(inp,true); toast('Введите вес тела'); return; }
-  addMeasure('weight', v, Date.now()); refreezeEx(id); save();
-  toast(`Вес тела: ${fmtNum(v)} кг`, null, null, 2000, 'check');
-  openBwSheet(id); renderWStep(); refresh();
+function saveBwPct(id){
+  const inp=$('#bwPct'), v=num(inp.value);
+  if(!v || v<5 || v>150){ markBad(inp,true); toast('Процент — от 5 до 150'); return; }
+  setExBw(id, v/100);
+}
+function bwToMeasure(){
+  closeModal(); statsMode='measures'; go('stats'); openMeasure('weight');
 }
 function recordEx(){
   const ex=exById(histEx); if(!ex) return;
@@ -4668,8 +4679,9 @@ document.addEventListener('click', e=>{
     case 'ex-step':          setExStep(id, +el.dataset.v); break;
     case 'ex-step-menu':     openStepSheet(histEx); break;
     case 'ex-bw-menu':       openBwSheet(id); break;
-    case 'ex-bw':            setExBw(id, +el.dataset.v); break;
-    case 'bw-body-save':     saveBwBody(id); break;
+    case 'ex-bw':            setExBw(id, el.dataset.v==='c' ? 'c' : +el.dataset.v); break;
+    case 'bw-pct-save':      saveBwPct(id); break;
+    case 'bw-to-measure':    bwToMeasure(); break;
     case 'ar-mode':          setArMode(el.dataset.m); break;
     case 'wake-toggle':      toggleWakeAll(); break;
     case 'plan-toggle':      togglePlan(); break;

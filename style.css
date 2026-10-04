@@ -765,3 +765,7 @@ button.pct-btn:active{opacity:.6}
 /* «Свой вес» */
 .bw-seg{margin:12px 0 6px}
 .backup-block.calm{border-color:var(--border);background:var(--card2)}
+.bw-custom{margin-top:4px}
+.bw-body{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;padding:12px;border-radius:12px;background:var(--card2);border:1px solid var(--border)}
+.bw-body-v{font-size:20px;font-weight:800;margin:2px 0;font-variant-numeric:tabular-nums}
+.bw-body .btn{flex:none}
