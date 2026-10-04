@@ -638,3 +638,15 @@ label.check.pi-warm{margin:0 0 10px;font-size:14px}
 .pi-ac{flex:1;min-width:0}
 .pi-ac input{width:100%;background:var(--card);padding:10px 12px}
 .exs-suggest{z-index:60}
+
+/* 1ПМ */
+.pill-btn{flex:none;background:rgba(180,140,255,.14);border:1px solid rgba(180,140,255,.45);color:#c9b0ff;border-radius:16px;
+  padding:7px 12px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer}
+.pill-btn:active{opacity:.6}
+.need-tag{display:inline-block;font-size:11px;font-weight:700;color:#ffb020;background:rgba(255,176,32,.14);border-radius:5px;padding:1px 6px;margin-left:4px;vertical-align:1px}
+.orm-preview{margin-top:12px;padding:12px;border-radius:10px;background:rgba(180,140,255,.10);border:1px solid rgba(180,140,255,.35);font-size:15px;color:var(--txt)}
+.orm-preview b{color:#c9b0ff;font-size:18px}
+.pi-src{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px;font-size:12px;color:var(--muted)}
+.pi-src button{border:1px solid var(--border);background:var(--card);color:var(--muted);border-radius:8px;padding:5px 8px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.pi-src button.active{border-color:rgba(180,140,255,.6);background:rgba(180,140,255,.14);color:#c9b0ff}
+.pi-btn{width:28px}
