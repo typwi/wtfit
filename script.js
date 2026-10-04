@@ -845,7 +845,8 @@ function hintCtx(ex){
       const curK = nextChip>=0 ? chips[nextChip].k : idx[idx.length-1];
       plan={day:x.d.name, tmp:!!x.tmp, chips, next:(sel && sel.src!=='plan') ? -1 : nextChip, need, done:wdone,
         it: nextChip>=0 ? chips[nextChip].it : planItem(x, idx[idx.length-1]),
-        note: cleanName(x.d.items[curK].notes), rest: x.d.items[curK].rest};
+        note: cleanName(x.d.items[curK].notes), rest: x.d.items[curK].rest,
+        pct: x.d.items[curK].pct, src: x.d.items[curK].src};
     }
   }
   return {cur, prev, today, done, prevSets, prevWarm, warmDone, plan};
@@ -1048,7 +1049,7 @@ function renderLastHint(){
   if(c.plan){
     html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}${c.plan.tmp?'Повтор':'Программа'} · <b>${c.plan.done} из ${c.plan.need}</b></div>${sw('plan')}</div>
       <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>
-      ${(c.plan.note || c.plan.rest!=null) ? `<div class="hint-meta">${c.plan.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(c.plan.rest)}</span>`:''}${c.plan.note?`<button type="button" class="hint-note-line" data-act="hint-note" title="Показать заметку целиком">«${esc(c.plan.note)}»</button>`:''}</div>` : ''}`;
+      ${(c.plan.pct || c.plan.note || c.plan.rest!=null) ? `<div class="hint-meta">${c.plan.pct?`<button type="button" class="pct-lbl pct-btn" data-act="orm-quick" data-id="${ex.id}" title="Изменить 1ПМ">${fmtNum(c.plan.pct)}% ${c.plan.src==='m'?'ручн. 1ПМ':'1ПМ'}</button>`:''}${c.plan.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(c.plan.rest)}</span>`:''}${c.plan.note?`<button type="button" class="hint-note-line" data-act="hint-note" title="Показать заметку целиком">«${esc(c.plan.note)}»</button>`:''}</div>` : ''}`;
   }
   if(!c.prev && c.today && prevOpen){
     html+=`<div class="hint-lbl">Раньше не делали · сегодня <b>${c.done} ${plural(c.done,'рабочий подход','рабочих подхода','рабочих подходов')}</b>${c.warmDone?` + ${c.warmDone} разм.`:''}</div>`;
@@ -1867,8 +1868,9 @@ function openOrmEdit(exIdOrName, back){
       <div class="orm-cur-v">${c.v?'≈ '+fmtNum(round(c.v,1))+' кг':'—'}</div>
       <div class="orm-cur-src">${esc(curOrmText(c))}</div>
     </div>
+    ${ex ? ormSrcHtml(ex) : ''}
     <div class="section-head"><span>Ручной 1ПМ</span><span class="muted">необязательно</span></div>
-    <p class="muted" style="margin:0 2px 2px">Чтобы подстроить программу под себя — например, взять 1ПМ чуть выше или ниже текущего. Работает в пунктах «%», где выбран «ручной». Укажите вес и максимум повторов с ним (точнее — до 8).</p>
+    <p class="muted" style="margin:0 2px 2px">Свой 1ПМ — если текущий по записям ещё не дотягивает до реального или хочется взять с запасом. После «Сохранить» все пункты «%» этого упражнения считаются от ручного. Укажите вес и максимум повторов с ним (точнее — до 8).</p>
     <div class="grid2">
       <div><label for="ormW">Вес, кг</label><input id="ormW" inputmode="decimal" value="${m?esc(inVal(m.w)):''}" placeholder="${c.rec?esc(inVal(c.rec.weight)):'0'}"></div>
       <div><label for="ormR">Повторы на максимум</label><input id="ormR" inputmode="numeric" value="${m?m.r:''}" placeholder="${c.rec?Math.min(Math.round(c.rec.reps),10):'5'}"></div>
@@ -1883,6 +1885,46 @@ function openOrmEdit(exIdOrName, back){
     ${hist.length?`<div class="section-head"><span>История 1ПМ</span></div><div class="card list-card">${hist.slice(0,8).map(h=>`<div class="rec-row"><div class="rec-main"><div class="rec-name">${fmtNum(round(e1rm(h.w,Math.round(h.r)),1))} кг</div><div class="rec-desc">${fmtNum(h.w)}×${fmtNum(h.r)} · ${h.src}</div></div><div class="rec-side">${h.ts?fmtDate(h.ts):''}</div></div>`).join('')}</div>`:''}`);
   const w=$('#ormW'); if(w && back && !m) w.focus();
 }
+/* Откуда пункты «%» этого упражнения берут 1ПМ — во всех программах и в идущем повторе.
+   Переключается одним нажатием; ручной сохранили — все переходят на ручной, убрали — обратно на текущий. */
+function pctItemsOf(exId){ const a=[]; forEachItem(it=>{ if(it.exId===exId && it.pct) a.push(it); }); return a; }
+function ormSrcHtml(ex){
+  const items=pctItemsOf(ex.id); if(!items.length) return '';
+  const nm=items.filter(it=>it.src==='m').length, all=nm===items.length ? 'm' : nm===0 ? 'c' : '';
+  const b=(src,lbl)=>`<button type="button" class="${all===src?'active':''}" data-act="orm-src" data-id="${ex.id}" data-src="${src}"${src==='m'&&!ex.orm?' disabled':''}>${lbl}</button>`;
+  return `<div class="orm-src">
+    <div class="orm-src-lbl">Пункты «%» в программах (${items.length}) считаются от</div>
+    <div class="seg orm-src-seg">${b('c','текущего')}${b('m','ручного')}</div>
+    ${!all?'<div class="muted">сейчас по-разному — выберите один источник для всех</div>':!ex.orm?'<div class="muted">ручной 1ПМ ещё не указан — введите его ниже</div>':''}
+  </div>`;
+}
+function setOrmSrc(exId, src){
+  const ex=exById(exId); if(!ex) return false;
+  if(src==='m' && !ex.orm) return false;
+  pctItemsOf(exId).forEach(it=>{ it.src=src; });
+  // открыт редактор дня — те же пункты в черновике
+  if(dayDraft) dayDraft.items.forEach(it=>{ if(it.pct && normKey(it.name)===normKey(ex.name)) it.src=src; });
+  refreezeEx(exId);
+  save();
+  return true;
+}
+function ormSrcToggle(exId, src){
+  if(!setOrmSrc(exId, src)) return;
+  const ex=exById(exId);
+  toast(`${ex.name}: веса «%» — от ${src==='m'?'ручного':'текущего'} 1ПМ`, null, null, 2500, 'check');
+  openOrmEdit(exId, ormEditBack);
+}
+// 1ПМ прямо с тренировки: после окна веса в подсказке пересчитаны; если в форме стоял плановый вес — он тоже обновится
+function ormQuick(exId){
+  const ex=exById(exId); if(!ex) return;
+  const c0=hintCtx(ex), oldW=c0.plan && c0.plan.it ? c0.plan.it.weight : null, formW=num($('#mWeight').value);
+  openOrmEdit(exId, ()=>{
+    closeModal();
+    renderRecord();
+    const e2=exByName(exInput.value), c1=e2 && e2.id===exId ? hintCtx(e2) : null;
+    if(c1 && c1.plan && c1.plan.it && formW!=null && formW===oldW && c1.plan.it.weight!=null) setVal('mWeight', c1.plan.it.weight);
+  });
+}
 function ormPreview(){
   const w=num($('#ormW')&&$('#ormW').value), r=num($('#ormR')&&$('#ormR').value), el=$('#ormPrev'); if(!el) return;
   if(w && r && r>=1 && r<=50) el.innerHTML=`Ручной 1ПМ ≈ <b>${fmtNum(round(e1rm(w,Math.round(r)),1))} кг</b>${r>12?' · много повторов — расчёт приблизительный':r>8?' · больше 8 повторов — расчёт грубее':''}`;
@@ -1896,17 +1938,18 @@ function ormSave(name){
   if(badW||badR){ toast('Вес — больше 0, повторы — целое число от 1 до 50', null, null, 3500, 'alert'); return; }
   const ex=getOrCreateEx(name);
   ex.orm={w, r, ts:Date.now()}; pushOrmHist(ex,'manual');
-  const re=refreezeEx(ex.id);
+  const n=pctItemsOf(ex.id).length;
+  setOrmSrc(ex.id, 'm');                    // ручной ввели — значит, считать от него: все пункты «%» упражнения
   save();
-  toast(`Ручной 1ПМ ${ex.name}: ≈ ${fmtNum(round(e1rm(w,r),1))} кг${re?' · веса программы пересчитаны':''}`, null, null, 2500, 'check');
+  toast(`Ручной 1ПМ ${ex.name}: ≈ ${fmtNum(round(e1rm(w,r),1))} кг${n?' · пункты «%» считаются от него':''}`, null, null, 3000, 'check');
   ormDone(ex.id);
 }
 function ormClear(id){
   const ex=exById(id); if(!ex) return;
   delete ex.orm;
-  refreezeEx(id);
+  setOrmSrc(id, 'c');                        // без ручного — обратно на текущий
   save();
-  toast('Ручной 1ПМ убран');
+  toast('Ручной 1ПМ убран · пункты «%» считаются от текущего');
   ormDone(id);
 }
 function ormDone(exId){
@@ -2559,6 +2602,7 @@ function selectWeek(i){
 const MKINDS=[
   {k:'weight',   name:'Вес тела',          short:'Вес',     unit:'кг'},
   {k:'fat',      name:'Процент жира',      short:'Жир',     unit:'%'},
+  {k:'height',   name:'Рост',              short:'Рост',    unit:'см'},
   {k:'neck',     name:'Шея',               short:'Шея',     unit:'см'},
   {k:'shoulders',name:'Плечи',             short:'Плечи',   unit:'см'},
   {k:'chest',    name:'Грудь',             short:'Грудь',   unit:'см'},
@@ -2656,7 +2700,8 @@ function bodySvg(){
       <text x="${x}" y="${inside?y+15:y+10}" text-anchor="${a}" class="bz-v">${l?fmtNum(l.v):'+'}${d?`<tspan class="bz-d"> ${d>0?'+':'−'}${fmtNum(Math.abs(d))}</tspan>`:''}</text>
     </g>`;
   }).join('');
-  return `<svg class="body-svg" viewBox="0 0 300 418" role="img" aria-label="Замеры тела">
+  return `<svg class="body-svg" viewBox="-40 0 340 418" role="img" aria-label="Замеры тела">
+    ${heightRuler()}
     <text x="16" y="16" class="bz-side">ЛЕВАЯ</text><text x="284" y="16" text-anchor="end" class="bz-side">ПРАВАЯ</text>
     <g class="body-base">
       <path d="${bodyOutline()}"/>
@@ -2667,6 +2712,28 @@ function bodySvg(){
     </g>
     ${zones}
   </svg>`;
+}
+/* Шкала роста слева от силуэта: от пола (стопы) до макушки, деления каждые 10 см, подписи каждые 50 см.
+   Роста нет — пунктирная линейка с «+ рост». Нажатие — записать или посмотреть рост. */
+function heightRuler(){
+  const vals=mValues('height'), last=vals[vals.length-1], H=last ? last.v : 0;
+  const top=10, bot=413, x=-14;
+  let ticks='';
+  if(H){
+    for(let cm=10; cm<H; cm+=10){
+      const y=bot-(bot-top)*cm/H, major=cm%50===0;
+      ticks+=`<line class="hr-tick${major?' major':''}" x1="${x-(major?8:4)}" y1="${y.toFixed(1)}" x2="${x}" y2="${y.toFixed(1)}"/>`;
+      if(major) ticks+=`<text class="hr-num" x="${x-10}" y="${(y+3).toFixed(1)}" text-anchor="end">${cm}</text>`;
+    }
+  }
+  return `<g class="hr${H?' has':''}" data-act="m-open" data-k="height">
+    <rect x="-40" y="0" width="38" height="418" fill="transparent"/>
+    <line class="hr-line" x1="${x}" y1="${top}" x2="${x}" y2="${bot}"/>
+    <line class="hr-cap" x1="${x-6}" y1="${top}" x2="${x+6}" y2="${top}"/>
+    <line class="hr-cap" x1="${x-6}" y1="${bot}" x2="${x+6}" y2="${bot}"/>
+    ${ticks}
+    <text class="hr-val" x="${x}" y="7" text-anchor="middle">${H ? fmtNum(H)+' см' : '+ рост'}</text>
+  </g>`;
 }
 function measuresHtml(){
   const wx=weightExercise();
@@ -4507,6 +4574,8 @@ document.addEventListener('click', e=>{
     case 'orm-save':         ormSave(el.dataset.name); break;
     case 'orm-cancel':       guardClose(ormCancel); break;
     case 'orm-clear':        ormClear(id); break;
+    case 'orm-src':          ormSrcToggle(id, el.dataset.src); break;
+    case 'orm-quick':        ormQuick(id); break;
     case 'pi-src':           toggleItemSrc(+el.dataset.i, el.dataset.src); break;
     case 'pi-more':          togglePiMore(+el.dataset.i); break;
     case 'di-copy':          dayItemCopy(+el.dataset.i); break;

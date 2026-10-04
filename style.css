@@ -733,3 +733,26 @@ button.prev-lbl .i.sm{margin:0;color:var(--muted)}
 .hint-meta .rest-lbl{flex:none;font-size:13px;font-weight:600}
 .hint-meta .rest-lbl .i.sm{margin:0 3px 0 0}
 .hint-meta .hint-note-line{flex:1;min-width:0;width:auto;padding-top:0}
+
+/* 1ПМ: откуда считают пункты «%», кнопка «70% 1ПМ» под подходами */
+.orm-src{margin-top:12px}
+.orm-src-lbl{font-size:13px;color:var(--muted);margin:0 2px 6px}
+.orm-src-seg{margin-bottom:4px}
+.orm-src-seg button.active{color:#c9b0ff}
+.orm-src-seg button:disabled{opacity:.4}
+.orm-src .muted{margin:2px 2px 0;font-size:12px}
+button.pct-btn{flex:none;border:none;font-family:inherit;cursor:pointer;margin:0;font-size:12px;line-height:1.5}
+button.pct-btn:active{opacity:.6}
+
+/* шкала роста у силуэта */
+.hr{cursor:pointer}
+.hr-line{stroke:#3a4256;stroke-width:1.4;stroke-dasharray:3 3}
+.hr.has .hr-line{stroke:#4f8cff;stroke-dasharray:none;stroke-width:1.6}
+.hr-cap{stroke:#3a4256;stroke-width:1.4}
+.hr.has .hr-cap{stroke:#4f8cff}
+.hr-tick{stroke:#4f6a99;stroke-width:1}
+.hr-tick.major{stroke:#8fb3ff;stroke-width:1.3}
+.hr-num{font-size:8px;fill:#8b93a7;font-weight:600;font-family:inherit;font-variant-numeric:tabular-nums}
+.hr-val{font-size:9px;fill:#4f8cff;font-weight:700;font-family:inherit}
+.hr.has .hr-val{fill:#e8eaed}
+.hr:active .hr-line{stroke:#9ec4ff}
