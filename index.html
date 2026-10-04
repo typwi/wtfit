@@ -100,7 +100,7 @@
 
       <div class="grid2">
         <div>
-          <label for="mWeight">Вес (кг)</label>
+          <label for="mWeight">Вес (кг)<span class="w-step" id="wStepLbl"></span></label>
           <div class="stepper">
             <button type="button" data-act="step" data-for="mWeight" data-d="-2.5"><svg class="i ic-minus" aria-hidden="true"><use href="#i-minus"></use></svg></button>
             <input id="mWeight" inputmode="decimal" placeholder="0" autocomplete="off">
@@ -177,6 +177,10 @@
           <div class="chip" data-act="rest-custom">Своё…</div>
         </div>
         <div class="muted ar-hint" id="arHint"></div>
+        <button type="button" class="warm-btn sm wake-btn" id="wakeBtn" data-act="wake-toggle" aria-pressed="false">
+          <span class="warm-sw"></span>Не гасить экран на тренировке
+        </button>
+        <div class="muted ar-hint hidden" id="restIosNote">На iPhone конец отдыха слышно, только пока WTFIT открыт на экране: вибрацию и уведомления iOS сайтам не даёт. Чтобы не пропустить — включите «Не гасить экран».</div>
       </div>
     </div>
 

@@ -690,3 +690,19 @@ label.auto-rest{display:flex;align-items:center;gap:6px;margin:0;text-transform:
 button.prev-lbl{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;text-align:left;display:inline-flex;align-items:center;flex-wrap:wrap;gap:0 4px}
 button.prev-lbl .i.sm{margin:0;color:var(--muted)}
 .hint-col > .hint-plan-row:first-child{margin-top:0;padding-top:0;border-top:none}
+
+/* пустая база: вернуть данные из копии */
+.fresh-card{border-color:rgba(255,138,92,.45);background:linear-gradient(135deg,rgba(255,138,92,.10),rgba(79,140,255,.06))}
+.fresh-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:16px}
+.fresh-card p{margin:8px 2px 2px;line-height:1.4}
+/* итог тренировки: напоминание о копии */
+.backup-block{border:1px solid rgba(255,176,32,.35);background:rgba(255,176,32,.07)}
+.backup-block .muted{line-height:1.4}
+.backup-block .btn.big{margin-top:10px}
+/* «Не гасить экран на тренировке» */
+.warm-btn.sm.wake-btn{margin-top:10px}
+.wake-btn.active{border-color:var(--accent);background:rgba(79,140,255,.12)}
+.wake-btn.active .warm-sw{background:var(--accent)}
+.w-step{text-transform:none;letter-spacing:0;font-weight:600;color:#9ec4ff}
+/* новый пункт программы — все поля сразу, без «Ещё» */
+.pi.full .pi-extra{border-top:none;padding-top:0;margin-top:0}

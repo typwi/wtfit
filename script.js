@@ -472,6 +472,7 @@ function setExStep(id, v){
   const ex=exById(id); if(!ex || !(v>0)) return;
   ex.step=v; save();
   $$('.step-seg button').forEach(b=>b.classList.toggle('active', +b.dataset.v===v));
+  renderWStep();
   toast(`Шаг веса «${ex.name}»: ${fmtNum(v)} кг`, null, null, 1800, 'check');
 }
 function openStepSheet(id){
@@ -674,10 +675,40 @@ async function guardClose(proceed){
 }
 $('#modal').addEventListener('click', e=>{ if(e.target.id==='modal') guardClose(closeModal); });
 
-/* ---- предупреждения: копия и запуск с экрана «Домой» ---- */
+/* ---- предупреждения: копия и запуск с экрана «Домой» ----
+   Данные живут только в этом приложении на этом телефоне: удалишь иконку с экрана «Домой» или сменится
+   адрес сайта (другой аккаунт GitHub, новое имя репозитория) — приложение откроется пустым. Спасает только
+   полная копия, поэтому о ней напоминаем: раз в 14 дней или раз в 5 тренировок, а пока копии нет — всегда. */
+const BACKUP_EVERY=5;
+// тренировок с записями после последней полной копии
+function workoutsSinceBackup(){ return recWorkouts().filter(w=>!isActive(w) && w.start>(DB.lastExport||0)).length; }
+function backupDue(){
+  if(!DB.records.length) return false;
+  if(!DB.lastExport) return true;
+  return Date.now()-DB.lastExport>14*DAY || workoutsSinceBackup()>=BACKUP_EVERY;
+}
 function backupWarnHtml(){
-  if(!DB.records.length || (DB.lastExport && Date.now()-DB.lastExport<=14*DAY)) return '';
-  return `<div class="warn-line" data-act="backup">${I('alert')}<span>${DB.lastExport?'Последняя резервная копия '+fmtDate(DB.lastExport):'Резервной копии ещё нет'} — нажмите, чтобы сохранить полную копию</span></div>`;
+  if(!backupDue()) return '';
+  const n=workoutsSinceBackup();
+  return `<div class="warn-line" data-act="backup">${I('alert')}<span>${DB.lastExport?`Последняя резервная копия ${fmtDate(DB.lastExport)}${n?` · после неё ${n} ${plural(n,'тренировка','тренировки','тренировок')}`:''}`:'Резервной копии ещё нет'} — нажмите, чтобы сохранить полную копию</span></div>`;
+}
+// «Сохранить копию» одним нажатием: сразу окно «Поделиться» (там «Сохранить в Файлы»), иначе — окно копии
+function backupNow(){
+  exportCtx={kind:'backup'};
+  if(canShareFiles()) shareExport(); else openBackup();
+}
+// пустая база (первый запуск, переустановка, новый адрес) — сразу предложить вернуть данные из копии
+const FRESH_KEY='fitness_fresh_off';
+function isEmptyDB(){ return !DB.records.length && !DB.programs.length && !DB.exercises.length && !DB.measures.length; }
+function freshHtml(){
+  if(!isEmptyDB()) return '';
+  try{ if(localStorage.getItem(FRESH_KEY)) return ''; }catch(e){}
+  return `<div class="card fresh-card">
+    <div class="fresh-title">${I('swap')}Уже вели дневник в WTFIT?</div>
+    <p class="muted">Если приложение переустановили или оно открылось по новому адресу, прежние записи сюда сами не переносятся. Верните их из полной копии — файла <b>WTFIT_копия_….json</b>.</p>
+    <button class="btn big" data-act="import" data-kind="backup">${I('swap')}Восстановить из копии</button>
+    <button class="btn ghost big" data-act="fresh-off">Начать с нуля</button>
+  </div>`;
 }
 function isIOS(){
   return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
@@ -689,7 +720,7 @@ function homeHintHtml(){
 }
 function renderNotices(){
   const box=$('#recNotice');
-  if(box) box.innerHTML=updateHtml()+homeHintHtml()+backupWarnHtml();
+  if(box) box.innerHTML=updateHtml()+freshHtml()+homeHintHtml()+backupWarnHtml();
 }
 
 /* ================== НАВИГАЦИЯ ================== */
@@ -893,6 +924,11 @@ document.addEventListener('input', e=>{ if(e.target.classList && e.target.classL
 function stepInput(id, d){
   const inp=$('#'+id); if(!inp) return;
   let v=round((num(inp.value)||0)+d,3);
+  // вес: шаг упражнения (гантели 2, тренажёр 5 …) и встаём на сетку шага: 61 → «+» 62,5, «−» 60
+  if(id==='mWeight'){
+    const ex=exByName(exInput.value), st=ex ? exStep(ex.id) : 2.5, cur=num(inp.value)||0;
+    v=round(d>0 ? (Math.floor(cur/st+1e-9)+1)*st : (Math.ceil(cur/st-1e-9)-1)*st, 3);
+  }
   if(v<0) v=0;
   const max=FIELD_MAX[id];
   if(max && v>max) v=max;
@@ -955,7 +991,14 @@ function togglePrev(){
   try{ localStorage.setItem(PREVOPEN_KEY, prevOpen?'1':'0'); }catch(e){}
   renderLastHint();
 }
+// у поля «Вес» — шаг кнопок ±, если у упражнения он не стандартный 2,5
+function renderWStep(){
+  const el=$('#wStepLbl'); if(!el) return;
+  const ex=exByName(exInput.value), st=ex ? exStep(ex.id) : 2.5;
+  el.textContent = st!==2.5 ? ` · шаг ${fmtNum(st)}` : '';
+}
 function renderLastHint(){
+  renderWStep();
   const box=$('#lastHint');
   const ex=exByName(exInput.value);
   if(!ex){ box.innerHTML=''; return; }
@@ -1027,7 +1070,7 @@ function swToggle(){
   try{ localStorage.setItem(SW_KEY, String(swStart)); }catch(e){}
   clearInterval(swTimer); swTimer=setInterval(swRender, 500);
   swRender();
-  requestWakeAny();
+  syncWake();
 }
 function swStop(announce){
   if(!swStart) return 0;
@@ -1035,13 +1078,9 @@ function swStop(announce){
   swStart=null; clearInterval(swTimer); swTimer=null;
   try{ localStorage.removeItem(SW_KEY); }catch(e){}
   const t=$('#mTime'); if(t){ t.value = sec ? minIn(sec) : ''; markBad(t,false); }
-  swRender();
+  swRender(); syncWake();
   if(announce) toast(`Время: ${fmtDur(sec)}`, null, null, 2000, 'timer');
   return sec;
-}
-// экран не гаснет, пока идёт секундомер (если браузер умеет)
-async function requestWakeAny(){
-  try{ if(!wakeLock && 'wakeLock' in navigator && !document.hidden){ wakeLock=await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release',()=>{ wakeLock=null; }); } }catch(e){}
 }
 
 function saveRecord(){
@@ -1129,7 +1168,7 @@ function startWorkout(silent){
   DB.workouts.push(w);
   DB.active.wId=w.id;
   save();
-  renderWorkoutBar();
+  renderWorkoutBar(); syncWake();
   if(!silent) toast('Тренировка началась', null, null, null, 'play');
 }
 async function stopWorkout(){
@@ -1145,7 +1184,7 @@ async function stopWorkout(){
   let had=false;
   if(w){ w.end=Date.now(); w.timed=true; had=DB.records.some(r=>r.wId===w.id); }
   cleanupWorkouts(); save();
-  renderWorkoutBar(); refresh();
+  renderWorkoutBar(); refresh(); syncWake();
   if(had) openSummary(w.id);
   else toast('Пустая тренировка не сохранена');
 }
@@ -1318,6 +1357,13 @@ function openSummary(wId){
   } else {
     html+=`<div class="sum-block muted">Похожих прошлых тренировок пока нет — сравнение появится в следующий раз.</div>`;
   }
+  if(backupDue()){
+    const n=workoutsSinceBackup();
+    html+=`<div class="sum-block backup-block">
+      <div class="sum-title">${I('save','sm')}Резервная копия</div>
+      <div class="muted">${DB.lastExport?`Последняя — ${fmtDate(DB.lastExport)}, после неё ${n} ${plural(n,'тренировка','тренировки','тренировок')}.`:'Копии ещё нет.'} Данные хранятся только в этом приложении: удалите иконку или смените адрес — они пропадут.</div>
+      <button class="btn big" data-act="backup-now">${I('save')}Сохранить копию в Файлы</button></div>`;
+  }
   html+=`<div class="grid2" style="margin-top:14px">
     <button class="btn ghost" data-act="w-open" data-id="${w.id}">Подробнее</button>
     <button class="btn" data-act="close-modal">Готово</button></div>
@@ -1387,7 +1433,7 @@ async function checkForgotten(){
   DB.active.wId=null; DB.active.plan=null;
   w.end=end; w.timed=true;
   cleanupWorkouts(); save();
-  renderWorkoutBar(); refresh();
+  renderWorkoutBar(); refresh(); syncWake();
   toast(recs.length ? `Тренировка завершена · ${fmtDur((end-w.start)/1000)}` : 'Пустая тренировка убрана', null, null, null, recs.length?'flag':null);
 }
 
@@ -1412,6 +1458,8 @@ function renderRestPresets(){
     : arMode==='fixed' ? `После «Сохранить» всегда ${fmtClock(lastRest)}. Время меняется кнопками ниже.`
     : `После «Сохранить» — отдых из пункта программы, вне программы — ${fmtClock(lastRest)}.`;
   $$('.rest-presets .chip[data-sec]').forEach(c=>c.classList.toggle('sel', +c.dataset.sec===lastRest));
+  const wb=$('#wakeBtn'); if(wb){ wb.classList.toggle('active', wakeAll); wb.setAttribute('aria-pressed', wakeAll?'true':'false'); }
+  const nt=$('#restIosNote'); if(nt) nt.classList.toggle('hidden', !isIOS() || wakeAll);
   const cu=$('.rest-presets .chip[data-act="rest-custom"]');
   if(cu) cu.classList.toggle('sel', ![60,120,180,300].includes(lastRest));
 }
@@ -1430,7 +1478,7 @@ function startRest(sec, auto){
   DB.active.restTotal=sec;
   save();
   showRest();
-  requestWake();
+  syncWake();
 }
 function showRest(){
   $('#restBlock').classList.remove('hidden');
@@ -1443,7 +1491,7 @@ function hideRest(){
   $('#restBlock').classList.add('hidden');
   $('#restProgress').style.width='0%';
   updateTopRest('');
-  releaseWake();
+  syncWake();
 }
 /* Отдых в верхней панели: на других вкладках — всегда, на «Записи» — когда блок отдыха уехал под панель */
 function initTopRest(){
@@ -1650,6 +1698,7 @@ let notifyAsked=false;
 function askNotify(){
   if(notifyAsked) return;
   notifyAsked=true;
+  if(isIOS()) return;        // на iPhone свёрнутое приложение заморожено — уведомление всё равно не придёт
   try{
     if(!window.Notification || Notification.permission!=='default') return;
     const p=Notification.requestPermission();
@@ -1676,16 +1725,34 @@ function signalRestEnd(){
   toast('Отдых окончен — к следующему подходу', null, null, 5000, 'bell');
   document.body.classList.remove('flash'); void document.body.offsetWidth; document.body.classList.add('flash');
 }
-let wakeLock=null;
-async function requestWake(){
-  try{
-    if(!wakeLock && 'wakeLock' in navigator && DB.active.restEnd && !document.hidden){
-      wakeLock=await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release',()=>{ wakeLock=null; });
-    }
-  }catch(e){ wakeLock=null; }
+/* Экран не гаснет, пока идёт отдых, идёт секундомер или — если включено «Не гасить экран на тренировке» —
+   идёт тренировка. Решает одна функция: по текущему состоянию включает или отпускает блокировку.
+   На iPhone это главный способ не пропустить конец отдыха: вибрацию и уведомления iOS сайтам не даёт,
+   а звук играет, только пока приложение открыто. */
+const WAKEALL_KEY='fitness_wake_all';
+let wakeLock=null, wakeBusy=false, wakeAll=false;
+try{ wakeAll=localStorage.getItem(WAKEALL_KEY)==='1'; }catch(e){}
+function wakeWanted(){ return !!DB.active.restEnd || !!swStart || (wakeAll && !!DB.active.wId); }
+async function syncWake(){
+  const want=wakeWanted() && !document.hidden;
+  if(want && !wakeLock && !wakeBusy && 'wakeLock' in navigator){
+    wakeBusy=true;
+    try{ wakeLock=await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release',()=>{ wakeLock=null; }); }
+    catch(e){ wakeLock=null; }
+    wakeBusy=false;
+    if(wakeLock && !wakeWanted()) syncWake();      // пока ждали разрешения, отдых/тренировка закончились
+  } else if(!want && wakeLock){
+    try{ wakeLock.release(); }catch(e){}
+    wakeLock=null;
+  }
 }
-function releaseWake(){ try{ if(wakeLock) wakeLock.release(); }catch(e){} wakeLock=null; }
+function toggleWakeAll(){
+  if(!('wakeLock' in navigator)){ toast('Этот браузер не умеет держать экран включённым', null, null, 3000, 'alert'); return; }
+  wakeAll=!wakeAll;
+  try{ localStorage.setItem(WAKEALL_KEY, wakeAll?'1':'0'); }catch(e){}
+  renderRestPresets(); syncWake();
+  toast(wakeAll ? 'Экран не гаснет, пока идёт тренировка' : 'Экран гаснет как обычно — кроме отдыха', null, null, 2500, wakeAll?'check':null);
+}
 
 /* ================== 1ПМ: ЭКРАНЫ ==================
    Текущий 1ПМ считается сам (curOrmInfo). Ручной: вес и максимум повторов (лучше до 8) — из них
@@ -2168,12 +2235,18 @@ async function renameEx(){
     if(!await ask(`Упражнение «${esc(other.name)}» уже есть. Объединить? ${n} ${plural(n,'запись','записи','записей')} из «${esc(ex.name)}» перейдут в него.`,'Объединить')) return;
     DB.records.forEach(r=>{ if(r.exId===ex.id) r.exId=other.id; });
     forEachItem(it=>{ if(it.exId===ex.id) it.exId=other.id; });
+    // настройки поглощённого упражнения не теряем: ручной 1ПМ — более свежий из двух, история — общая,
+    // шаг веса — если у оставшегося его нет
+    const kept=[];
+    if(ex.orm && (!other.orm || (ex.orm.ts||0)>(other.orm.ts||0))){ other.orm=Object.assign({}, ex.orm); kept.push('ручной 1ПМ'); }
+    if(ex.ormHist && ex.ormHist.length) other.ormHist=(other.ormHist||[]).concat(ex.ormHist).sort((a,b)=>(a.ts||0)-(b.ts||0)).slice(-20);
+    if(ex.step && !other.step){ other.step=ex.step; kept.push('шаг веса'); }
     DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
     { const x=planCtx(); if(x) syncPlanFix(x); }
     save(); closeModal();
     if(formHad){ exInput.value=other.name; }
     openHistory(other.id);
-    toast('Упражнения объединены');
+    toast('Упражнения объединены'+(kept.length?' · перенесены: '+kept.join(', '):''), null, null, 3000, 'check');
     return;
   }
   ex.name=name;
@@ -2345,7 +2418,7 @@ async function deleteWorkout(id){
   }
   DB.records=DB.records.filter(r=>r.wId!==id);
   DB.workouts=DB.workouts.filter(x=>x.id!==id);
-  save(); closeModal(); renderWorkoutBar(); refresh();
+  save(); closeModal(); renderWorkoutBar(); refresh(); syncWake();
   toast('Тренировка удалена');
 }
 
@@ -2998,10 +3071,11 @@ async function deleteDay(id){
 }
 
 /* ---- редактор тренировки программы ----
-   У пункта сразу видны упражнение, вес, повторы и подходы. Остальное (источник 1ПМ, время, отдых,
-   разминка, тест, заметка) — под «Ещё ▾»; в свёрнутом виде там короткая сводка. */
+   Новый пункт (новая тренировка или «Добавить упражнение») показан целиком — заполняется за один раз.
+   У уже сохранённых пунктов сразу видны упражнение, вес, повторы и подходы, остальное (источник 1ПМ,
+   время, отдых, разминка, тест, заметка) — под «Ещё ▾»; в свёрнутом виде там короткая сводка. */
 let dayDraft=null;
-function emptyItem(){ return {name:'', reps:'', sets:'', weight:'', pct:false, src:'c', time:'', notes:'', rest:'', warm:false, test:false, open:false}; }
+function emptyItem(){ return {name:'', reps:'', sets:'', weight:'', pct:false, src:'c', time:'', notes:'', rest:'', warm:false, test:false, open:false, full:true}; }
 // сводка скрытых настроек пункта: «от текущего 1ПМ · отдых 2 мин · разминка»
 function piSum(o){
   const t=v=>String(v==null?'':v).trim(), p=[];
@@ -3027,7 +3101,7 @@ function piRead(el, old){
   return {name:g('.pi-name'), reps:g('.pi-reps'), sets:g('.pi-sets'), weight:g('.pi-weight'),
     pct:el.querySelector('.pi-unit').classList.contains('pct'), src:(old&&old.src)==='m'?'m':'c',
     time:g('.pi-time'), notes:g('.pi-notes'), rest:g('.pi-restv'), warm:ch('.pi-warmv'), test:ch('.pi-testv'),
-    open:el.classList.contains('open')};
+    open:el.classList.contains('open'), full:el.classList.contains('full')};
 }
 function togglePiMore(i){
   const el=$$('#dItems .pi')[i]; if(!el) return;
@@ -3100,7 +3174,7 @@ function piHtml(it, i, n){
   const srcSeg = it.pct ? (()=>{ const ex=exByName(cleanName(it.name)), c=ex?curOrm(ex.id):0, m=ex?manualOrm(ex.id):0;
     const b=(src,lbl,v)=>`<button type="button" class="${it.src===src?'active':''}" data-act="pi-src" data-i="${i}" data-src="${src}">${lbl} ${v?fmtNum(round(v,1)):'—'}</button>`;
     return `<div class="pi-src"><span>% от 1ПМ:</span>${b('c','текущий',c)}${b('m','ручной',m)}</div>`; })() : '';
-  return `<div class="pi${it.open?' open':''}" data-i="${i}">
+  return `<div class="pi${it.full?' open full':it.open?' open':''}" data-i="${i}">
       <div class="pi-head"><span class="pi-num">${i+1}</span>
         <div class="autocomplete pi-ac"><input class="pi-name" data-exs="1" value="${esc(it.name)}" placeholder="Упражнение" autocomplete="off" autocorrect="off" autocapitalize="sentences"><div class="suggest exs-suggest"></div></div>
         <button type="button" class="pi-btn" data-act="di-move" data-i="${i}" data-d="-1"${i===0?' disabled':''} aria-label="Выше">${I('up')}</button>
@@ -3113,14 +3187,14 @@ function piHtml(it, i, n){
         <label class="pi-l">Повторы<input class="pi-reps" inputmode="decimal" value="${esc(it.reps)}" placeholder="—" autocomplete="off"></label>
         <label class="pi-l">Подходы<input class="pi-sets" inputmode="decimal" value="${esc(it.sets)}" placeholder="—" autocomplete="off"></label>
       </div>
-      <button type="button" class="pi-more" data-act="pi-more" data-i="${i}"><span class="pi-more-l">Ещё${I('down')}</span><span class="pi-more-sum">${esc(piSum(it))}</span></button>
+      ${it.full?'':`<button type="button" class="pi-more" data-act="pi-more" data-i="${i}"><span class="pi-more-l">Ещё${I('down')}</span><span class="pi-more-sum">${esc(piSum(it))}</span></button>`}
       <div class="pi-extra">
         ${srcSeg}
         <div class="pi-grid pi-grid2">
           <label class="pi-l">Время, мин<input class="pi-time" inputmode="decimal" value="${esc(it.time)}" placeholder="—" autocomplete="off"></label>
           <label class="pi-l">Отдых, мин<input class="pi-restv" inputmode="decimal" value="${esc(it.rest)}" placeholder="—" autocomplete="off"></label>
         </div>
-        <div class="pi-hint">Отдых 0 — без отдыха; пусто — как выбрано на экране «Запись».</div>
+        ${(i===0 || !it.full) ? '<div class="pi-hint">Отдых 0 — без отдыха; пусто — как выбрано на экране «Запись».</div>' : ''}
         <div class="pi-checks">
           <label class="check"><input type="checkbox" class="pi-warmv"${it.warm?' checked':''}>Разминка</label>
           <label class="check"><input type="checkbox" class="pi-testv"${it.test?' checked':''}>Тест 1ПМ</label>
@@ -3495,7 +3569,8 @@ function openDataSheet(){
   openModal(`<div class="brand"><img src="icon-192.png" alt="" width="44" height="44"><div><div class="brand-name">WTFIT</div><div class="muted">дневник тренировок · версия ${esc(APP_VERSION)}</div></div></div>
     <div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
     <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.<br>
-    ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}</p>
+    ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}<br>
+    Если удалить иконку с экрана «Домой» или открыть приложение по другому адресу, данные не перенесутся — вернуть их можно только из полной копии.</p>
     <p class="muted" id="persistInfo">Защита хранилища: проверяется…</p>
     <button class="btn big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
     <button class="btn ghost big" data-act="import" data-kind="backup">${I('swap')}Восстановить из копии</button>
@@ -4306,6 +4381,7 @@ document.addEventListener('click', e=>{
     case 'ex-step':          setExStep(id, +el.dataset.v); break;
     case 'ex-step-menu':     openStepSheet(histEx); break;
     case 'ar-mode':          setArMode(el.dataset.m); break;
+    case 'wake-toggle':      toggleWakeAll(); break;
     case 'plan-toggle':      togglePlan(); break;
     case 'w-rename':         renameWorkout(id); break;
     case 'w-rename-active':  if(DB.active.wId) renameWorkout(DB.active.wId); break;
@@ -4347,6 +4423,8 @@ document.addEventListener('click', e=>{
     case 'import-run':       runImport(el.dataset.mode); break;
     case 'clear-all':        clearAll(); break;
     case 'backup':           openBackup(); break;
+    case 'backup-now':       backupNow(); break;
+    case 'fresh-off':        try{ localStorage.setItem(FRESH_KEY,'1'); }catch(_){} renderNotices(); break;
     case 'backup-restore':   restoreBackup(); break;
     case 'import-prog-run':  runProgramImport(); break;
     case 'app-reload':       location.reload(); break;
@@ -4417,7 +4495,8 @@ document.addEventListener('visibilitychange', ()=>{
   if(document.hidden) return;
   renderWorkoutBar();
   try{ if(AC && AC.state!=='running') AC.resume().catch(()=>{}); }catch(_){}   // разбудить звук после сворачивания
-  if(DB.active.restEnd){ tickRest(); requestWake(); }
+  if(DB.active.restEnd) tickRest();
+  syncWake();
   if(!$('#modal').classList.contains('show')) refresh();
   checkForgotten();
   if(swReg) swReg.update().then(checkUpdate, checkUpdate);   // проверить, не вышла ли новая версия
@@ -4482,6 +4561,7 @@ initTopRest();
 if(swStart){ swTimer=setInterval(swRender, 500); }
 swRender();
 renderRestPresets();
+syncWake();
 $$('.note-toggle').forEach(b=>b.classList.toggle('active', notesOn));
 $('#scroller').addEventListener('scroll', ()=>{ if(DB.active.restEnd) updateTopRest(); }, {passive:true});
 askPersist();
