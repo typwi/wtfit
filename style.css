@@ -764,3 +764,4 @@ button.pct-btn:active{opacity:.6}
 .pi-note-row .pi-notes{width:100%}
 /* «Свой вес» */
 .bw-seg{margin:12px 0 6px}
+.backup-block.calm{border-color:var(--border);background:var(--card2)}

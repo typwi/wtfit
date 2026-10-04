@@ -1441,13 +1441,12 @@ function openSummary(wId){
   } else {
     html+=`<div class="sum-block muted">Похожих прошлых тренировок пока нет — сравнение появится в следующий раз.</div>`;
   }
-  if(backupDue()){
-    const n=workoutsSinceBackup();
-    html+=`<div class="sum-block backup-block">
-      <div class="sum-title">${I('save','sm')}Резервная копия</div>
-      <div class="muted">${DB.lastExport?`Последняя — ${fmtDate(DB.lastExport)}, после неё ${n} ${plural(n,'тренировка','тренировки','тренировок')}.`:'Копии ещё нет.'} Данные хранятся только в этом приложении: удалите иконку или смените адрес — они пропадут.</div>
-      <button class="btn big" data-act="backup-now">${I('save')}Сохранить копию в Файлы</button></div>`;
-  }
+  // полная копия — после каждой тренировки; давно не было — блок заметнее
+  { const due=backupDue(), n=workoutsSinceBackup();
+    html+=`<div class="sum-block backup-block${due?'':' calm'}">
+      <div class="sum-title">${I('save','sm')}Полная копия</div>
+      <div class="muted">${DB.lastExport?`Последняя — ${fmtDate(DB.lastExport)}${n?`, после неё ${n} ${plural(n,'тренировка','тренировки','тренировок')}`:''}.`:'Копии ещё нет.'}${due?' Данные хранятся только в этом приложении: удалите иконку или смените адрес — они пропадут.':' Сохраните и эту тренировку — одно нажатие.'}</div>
+      <button class="btn big${due?'':' ghost'}" data-act="backup-now">${I('save')}Сохранить копию в Файлы</button></div>`; }
   html+=`<div class="grid2" style="margin-top:14px">
     <button class="btn ghost" data-act="w-open" data-id="${w.id}">Подробнее</button>
     <button class="btn" data-act="close-modal">Готово</button></div>
