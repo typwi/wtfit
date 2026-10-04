@@ -203,7 +203,6 @@ function normPrograms(arr){
           pct:(num(it.pct)>0 && num(it.pct)<=200) ? num(it.pct) : null,
           // источник 1ПМ для «%»: c — текущий, m — ручной (старые «авто»/«лучший» → текущий)
           src: (it.src==null || it.src==='' || it.src==='m') ? 'm' : 'c',
-          repsMax: num(it.repsMax) && num(it.reps) && num(it.repsMax)>num(it.reps) ? num(it.repsMax) : null,
           test: !!it.test}))}))}))}));
 }
 
@@ -478,7 +477,7 @@ function setExStep(id, v){
 function openStepSheet(id){
   const ex=exById(id); if(!ex) return;
   openModal(`<div class="sheet-head"><h2>Шаг веса · ${esc(ex.name)}</h2>${closeX()}</div>
-    <p class="muted">До какого шага округлять веса «% 1ПМ» и прибавку двойной прогрессии: штанга — 2,5, гантели — 1–2, тренажёр — 5 (или шаг блока).</p>
+    <p class="muted">До какого шага округлять веса «% 1ПМ»: штанга — 2,5, гантели — 1–2, тренажёр — 5 (или шаг блока).</p>
     ${stepSeg(ex)}`);
 }
 // отдых перед каждой записью = время от предыдущей записи в той же тренировке
@@ -514,39 +513,24 @@ function round25(v){ return Math.round(v/2.5)*2.5; }
 // шаг веса упражнения (штанга 2,5 · гантели 2 · тренажёр 5 …)
 function exStep(exId){ const e=exById(exId); return (e && e.step) || 2.5; }
 function roundStep(v, exId){ const st=exStep(exId); return round(Math.round(v/st)*st, 2); }
-// двойная прогрессия для пунктов в кг с диапазоном повторов
-function progWeight(it){
-  const base=it.weight;
-  if(!it.repsMax || !base) return base;
-  const prev=exSessions(it.exId).find(x=>x.wId!==DB.active.wId && x.recs.some(isWork));
-  if(!prev) return base;
-  const work=workSets(prev.recs).filter(r=>r.weight);
-  if(!work.length) return base;
-  const tw=Math.max(...work.map(r=>r.weight));
-  if(tw<base) return base;
-  const need=Math.max(1, Math.round(it.sets||work.length));
-  const atTop=work.filter(r=>r.weight===tw);
-  if(atTop.length>=need && atTop.slice(0,need).every(r=>(r.reps||0)>=it.repsMax)) return round(tw+exStep(it.exId),2);
-  return tw;
-}
+// вес пункта «% 1ПМ» (у пунктов в кг вес задан прямо)
 function itemWeight(it){
-  if(it.pct){ const base=ormBase(it); return base ? roundStep(base*it.pct/100, it.exId) : null; }
-  return progWeight(it);
+  if(!it.pct) return it.weight;
+  const base=ormBase(it);
+  return base ? roundStep(base*it.pct/100, it.exId) : null;
 }
 function rItem(it){
-  if(!it || it.frozen || it.resolved || (!it.pct && !it.repsMax)) return it;
-  const w=itemWeight(it);
-  return Object.assign({}, it, {weight:w, up: !it.pct && w>(it.weight||0), repsMin:it.repsMax?it.reps:null, reps:it.repsMax||it.reps, resolved:true, baseW:it.weight});
+  if(!it || it.frozen || it.resolved || !it.pct) return it;
+  return Object.assign({}, it, {weight:itemWeight(it), resolved:true});
 }
 /* ---- фиксация весов идущей тренировки ----
-   Веса «% 1ПМ» и двойной прогрессии считаются при старте и не меняются до «Стоп» (иначе прыгали бы
-   после каждого тяжёлого подхода). Фиксация привязана не к номеру пункта, а к его «подписи» — тому,
-   от чего зависит вес: упражнение, процент и источник 1ПМ, вес и диапазон повторов. Поэтому пункт можно
-   вставить, удалить или переставить посреди тренировки — у остальных пунктов веса останутся свои. */
-function needsFix(it){ return !!(it && (it.pct || it.repsMax)); }
-function itemSig(it){
-  return [it.exId, it.pct||0, it.pct ? (it.src==='m'?'m':'c') : '', it.pct ? 0 : (it.weight||0), it.repsMax||0, it.repsMax ? (it.sets||0) : 0].join('|');
-}
+   Веса «% 1ПМ» считаются при старте и не меняются до «Стоп» (иначе прыгали бы после каждого
+   тяжёлого подхода). Фиксация привязана не к номеру пункта, а к его «подписи» — тому, от чего зависит
+   вес: упражнение, процент и источник 1ПМ. Поэтому пункт можно вставить, удалить или переставить
+   посреди тренировки — у остальных пунктов веса останутся свои. */
+function needsFix(it){ return !!(it && it.pct); }
+// формат подписи совместим с прежним (6 полей) — фиксация идущей тренировки переживает обновление
+function itemSig(it){ return [it.exId, it.pct||0, it.src==='m'?'m':'c', 0, 0, 0].join('|'); }
 // зафиксированный вес для каждого пункта дня (undefined — фиксации нет); одинаковые пункты разбирают записи по очереди
 function planFix(x){
   const pl=DB.active.plan, out=[];
@@ -586,20 +570,20 @@ function planItem(x, k){
   const it=x.d.items[k]; if(!it) return it;
   const w=needsFix(it) ? planFix(x)[k] : undefined;
   if(w!=null)
-    return Object.assign({}, it, {weight:w, frozen:true, up: !it.pct && w>(it.weight||0), repsMin:it.repsMax?it.reps:null, reps:it.repsMax||it.reps, baseW:it.weight});
+    return Object.assign({}, it, {weight:w, frozen:true});
   return rItem(it);
 }
 function planDesc(it){
   if(!it) return '';
   const r=rItem(it), parts=[];
-  const reps = r.repsMin ? `${fmtNum(r.repsMin)}–${fmtNum(r.reps)} повт` : (r.reps ? `${fmtNum(r.reps)} повт` : '');
+  const reps = r.reps ? `${fmtNum(r.reps)} повт` : '';
   if(it.pct) parts.push(r.weight?fmtNum(r.weight)+' кг':(it.src==='m'?'укажите ручной 1ПМ':'нужен тест 1ПМ'));
   else if(r.weight) parts.push(fmtNum(r.weight)+' кг');
   if(reps) parts.push(r.sets ? `${reps} × ${fmtNum(r.sets)} подх` : reps);
   else if(r.sets) parts.push(fmtNum(r.sets)+' подх');
   if(r.time) parts.push(fmtDur(r.time));
   const src = it.src==='m'?'ручн. 1ПМ':'1ПМ';
-  return `${it.test?'<span class="test-tag">тест 1ПМ</span> ':''}${it.pct?`<span class="pct-lbl">${fmtNum(it.pct)}% ${src}</span> `:''}${esc(parts.join(' · '))||'—'}${r.up?` <span class="up-lbl">↑ +${fmtNum(round(r.weight-(r.baseW||0),2))}</span>`:''}${it.rest!=null?` <span class="rest-lbl">${I('pause','sm')}${restLabel(it.rest)}</span>`:''}`;
+  return `${it.test?'<span class="test-tag">тест 1ПМ</span> ':''}${it.pct?`<span class="pct-lbl">${fmtNum(it.pct)}% ${src}</span> `:''}${esc(parts.join(' · '))||'—'}${it.rest!=null?` <span class="rest-lbl">${I('pause','sm')}${restLabel(it.rest)}</span>`:''}`;
 }
 function planDescPlain(it){
   return [esc(describe(it))||'—', it.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(it.rest)}</span>`:''].filter(Boolean).join(' ');
@@ -808,7 +792,9 @@ function hintCtx(ex){
       idx.forEach(k=>{ const it=x.d.items[k], s=st[k];
         const ri=planItem(x,k);
         for(let j=0;j<s.need;j++) chips.push({it:ri, k, done:j<s.done, warm:!!it.warm}); });
-      const nextChip=chips.findIndex(c=>!c.done);
+      const nk=planNextIdx(x, st, ex.id);
+      let nextChip=chips.findIndex(c=>!c.done && c.k===nk);
+      if(nextChip<0) nextChip=chips.findIndex(c=>!c.done);
       const work=idx.filter(k=>!x.d.items[k].warm);
       const need=work.reduce((a,k)=>a+st[k].need,0), wdone=work.reduce((a,k)=>a+st[k].done,0);
       plan={day:x.d.name, chips, next:nextChip, need, done:wdone,
@@ -945,7 +931,7 @@ function autoFillNext(moveOn){
     if(c.plan.next>=0){ const ch=c.plan.chips[c.plan.next]; fillSet(ch.it, ch.warm); return true; }
     if(moveOn){
       // все подходы этого упражнения по программе сделаны — переходим к следующему пункту программы
-      const x=planCtx(), i=planStatus(x).findIndex(s2=>!s2.ok);
+      const x=planCtx(), i=planNextIdx(x, planStatus(x));
       if(i>=0){ fillFromPlan(i, true); toast(`Дальше: ${exInput.value}`, null, null, 2500, 'repeat'); return true; }
     }
     return false;
@@ -958,22 +944,33 @@ function autoFillNext(moveOn){
   }
   return false;
 }
+/* «Прошлый раз» под полем упражнения свёрнут по умолчанию (одна строка «Прошлый раз ▾»): подходы
+   прошлой тренировки видны по нажатию, состояние запоминается. Строка «Программа» видна всегда.
+   Автоподстановка из прошлого раза работает и в свёрнутом виде. */
+const PREVOPEN_KEY='fitness_prev_open';
+let prevOpen=false;
+try{ prevOpen=localStorage.getItem(PREVOPEN_KEY)==='1'; }catch(e){}
+function togglePrev(){
+  prevOpen=!prevOpen;
+  try{ localStorage.setItem(PREVOPEN_KEY, prevOpen?'1':'0'); }catch(e){}
+  renderLastHint();
+}
 function renderLastHint(){
   const box=$('#lastHint');
   const ex=exByName(exInput.value);
   if(!ex){ box.innerHTML=''; return; }
   const c=hintCtx(ex);
   if(!c.prev && !c.today && !c.plan){
-    box.innerHTML=`<div class="hint-card"><div class="muted">Прошлый раз · записей по «${esc(ex.name)}» ещё нет</div></div>`;
+    box.innerHTML = prevOpen ? `<div class="hint-card"><div class="muted">Прошлый раз · записей по «${esc(ex.name)}» ещё нет</div></div>` : '';
     return;
   }
   const chip=(r,i,cls,src)=>`<button type="button" class="hs${cls}" data-act="fill-chip" data-src="${src}" data-i="${i}">${esc(setLabel(r))}</button>`;
   const sw=src=>{ const on = autoSrc===src || (autoSrc==='plan' && src==='prev' && !c.plan);
     return `<button type="button" class="auto-sw${on?' active':''}" data-act="auto-src" data-src="${src}" aria-pressed="${on}"><span class="warm-sw"></span>авто</button>`; };
-  let html='<div class="hint-card hint-col">';
-  if(c.prev){
+  let html='';
+  if(c.prev && prevOpen){
     const n=c.cur ? prevNextIdx(c) : {warm:null,i:-1};
-    html+=`<div class="hint-row"><div class="hint-lbl">Прошлый раз · ${relDay(c.prev.recs[0].ts)}${c.cur?` · сегодня <b>${c.done} из ${c.prevSets.length}</b>`:''}</div>${sw('prev')}</div>
+    html+=`<div class="hint-row"><button type="button" class="hint-lbl prev-lbl" data-act="prev-toggle" aria-expanded="true">Прошлый раз · ${relDay(c.prev.recs[0].ts)}${c.cur?` · сегодня <b>${c.done} из ${c.prevSets.length}</b>`:''}${I('up','sm')}</button>${sw('prev')}</div>
       <div class="hint-sets">${
         c.prevWarm.map((r,i)=>chip(r,i,' warm'+(i<c.warmDone?' done':'')+(n.warm===true&&i===n.i?' next':''),'warm')).join('')
       }${c.prevSets.map((r,i)=>chip(r,i,(c.cur&&i<c.done?' done':'')+(n.warm===false&&i===n.i?' next':''),'prev')).join('')}</div>`;
@@ -982,10 +979,11 @@ function renderLastHint(){
     html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · <b>${c.plan.done} из ${c.plan.need}</b></div>${sw('plan')}</div>
       <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>`;
   }
-  if(!c.prev && c.today){
+  if(!c.prev && c.today && prevOpen){
     html+=`<div class="hint-lbl">Раньше не делали · сегодня <b>${c.done} ${plural(c.done,'рабочий подход','рабочих подхода','рабочих подходов')}</b>${c.warmDone?` + ${c.warmDone} разм.`:''}</div>`;
   }
-  box.innerHTML=html+'</div>';
+  box.innerHTML=(html ? `<div class="hint-card hint-col">${html}</div>` : '')
+    + (c.prev && !prevOpen ? `<button type="button" class="prev-toggle" data-act="prev-toggle" aria-expanded="false">Прошлый раз${I('down','sm')}</button>` : '');
 }
 
 function recRow(r, fromW, gaps){
@@ -1096,10 +1094,10 @@ function saveRecord(){
   let restSec=lastRest;
   const px=planCtx();
   if(px){
-    // пункт программы, к которому относится этот подход: последний пункт этого упражнения и типа, где уже есть выполненные подходы
+    // пункт программы, в который засчитан этот подход; все пункты уже закрыты — последний пункт этого упражнения и типа
     const st=planStatus(px);
-    let k=-1;
-    px.d.items.forEach((it,i)=>{ if(it.exId===ex.id && !!it.warm===!!rec.warm && st[i].done>0) k=i; });
+    let k=st.byRec.has(rec.id) ? st.byRec.get(rec.id) : -1;
+    if(k<0) px.d.items.forEach((it,i)=>{ if(it.exId===ex.id && !!it.warm===!!rec.warm && st[i].done>0) k=i; });
     if(k>=0 && px.d.items[k].rest!=null) restSec=px.d.items[k].rest;
   }
   if(arMode==='fixed') restSec=lastRest;
@@ -3000,15 +2998,14 @@ async function deleteDay(id){
 }
 
 /* ---- редактор тренировки программы ----
-   У пункта сразу видны упражнение, вес, повторы и подходы. Остальное (источник 1ПМ, «повт. до»,
-   время, отдых, разминка, тест, заметка) — под «Ещё ▾»; в свёрнутом виде там короткая сводка. */
+   У пункта сразу видны упражнение, вес, повторы и подходы. Остальное (источник 1ПМ, время, отдых,
+   разминка, тест, заметка) — под «Ещё ▾»; в свёрнутом виде там короткая сводка. */
 let dayDraft=null;
-function emptyItem(){ return {name:'', reps:'', sets:'', weight:'', pct:false, src:'c', time:'', notes:'', rest:'', warm:false, repsMax:'', test:false, open:false}; }
-// сводка скрытых настроек пункта: «от текущего 1ПМ · до 12 повт · отдых 2 мин · разминка»
+function emptyItem(){ return {name:'', reps:'', sets:'', weight:'', pct:false, src:'c', time:'', notes:'', rest:'', warm:false, test:false, open:false}; }
+// сводка скрытых настроек пункта: «от текущего 1ПМ · отдых 2 мин · разминка»
 function piSum(o){
   const t=v=>String(v==null?'':v).trim(), p=[];
   if(o.pct) p.push(o.src==='m'?'от ручного 1ПМ':'от текущего 1ПМ');
-  if(t(o.repsMax)) p.push('до '+t(o.repsMax)+' повт');
   if(t(o.time)) p.push(t(o.time)+' мин');
   if(t(o.rest)) p.push(num(o.rest)===null ? 'без отдыха' : 'отдых '+t(o.rest)+' мин');
   if(o.warm) p.push('разминка');
@@ -3029,7 +3026,7 @@ function piRead(el, old){
   const g=c=>el.querySelector(c).value, ch=c=>el.querySelector(c).checked;
   return {name:g('.pi-name'), reps:g('.pi-reps'), sets:g('.pi-sets'), weight:g('.pi-weight'),
     pct:el.querySelector('.pi-unit').classList.contains('pct'), src:(old&&old.src)==='m'?'m':'c',
-    time:g('.pi-time'), notes:g('.pi-notes'), rest:g('.pi-restv'), warm:ch('.pi-warmv'), repsMax:g('.pi-repsmax'), test:ch('.pi-testv'),
+    time:g('.pi-time'), notes:g('.pi-notes'), rest:g('.pi-restv'), warm:ch('.pi-warmv'), test:ch('.pi-testv'),
     open:el.classList.contains('open')};
 }
 function togglePiMore(i){
@@ -3093,7 +3090,7 @@ function openDayEdit(id, folderId){
     name: x ? x.d.name : nextName('Тренировка '+fx.f.days.length, fx.f.days.map(d=>d.name)),
     items: x ? x.d.items.map(it=>{ const e=exById(it.exId);
       return {name:e?e.name:'', reps:inVal(it.reps), sets:inVal(it.sets), weight:inVal(it.pct||it.weight), pct:!!it.pct, src:it.src==='m'?'m':'c', time:minIn(it.time), notes:it.notes||'',
-        rest:restIn(it.rest), warm:!!it.warm, repsMax:it.repsMax?inVal(it.repsMax):'', test:!!it.test, open:false}; }) : []
+        rest:restIn(it.rest), warm:!!it.warm, test:!!it.test, open:false}; }) : []
   };
   if(!dayDraft.items.length) dayDraft.items.push(emptyItem());
   delete modalBase.day;                 // новое открытие редактора — новое исходное состояние
@@ -3119,12 +3116,11 @@ function piHtml(it, i, n){
       <button type="button" class="pi-more" data-act="pi-more" data-i="${i}"><span class="pi-more-l">Ещё${I('down')}</span><span class="pi-more-sum">${esc(piSum(it))}</span></button>
       <div class="pi-extra">
         ${srcSeg}
-        <div class="pi-grid">
-          <label class="pi-l">Повт. до<input class="pi-repsmax" inputmode="decimal" value="${esc(it.repsMax||'')}" placeholder="—" autocomplete="off"></label>
+        <div class="pi-grid pi-grid2">
           <label class="pi-l">Время, мин<input class="pi-time" inputmode="decimal" value="${esc(it.time)}" placeholder="—" autocomplete="off"></label>
           <label class="pi-l">Отдых, мин<input class="pi-restv" inputmode="decimal" value="${esc(it.rest)}" placeholder="—" autocomplete="off"></label>
         </div>
-        <div class="pi-hint">«Повт. до» — диапазон для прогрессии: сделал верх во всех подходах — вес растёт на шаг. Отдых 0 — без отдыха.</div>
+        <div class="pi-hint">Отдых 0 — без отдыха; пусто — как выбрано на экране «Запись».</div>
         <div class="pi-checks">
           <label class="check"><input type="checkbox" class="pi-warmv"${it.warm?' checked':''}>Разминка</label>
           <label class="check"><input type="checkbox" class="pi-testv"${it.test?' checked':''}>Тест 1ПМ</label>
@@ -3185,7 +3181,7 @@ function saveDay(){
   if(!p){ closeModal(); return; }
   const name=cleanName(D.name);
   if(!name){ markBad($('#dName'),true); toast('Введите название тренировки'); return; }
-  const LIM=[['.pi-weight','weight'],['.pi-reps','reps'],['.pi-sets','sets'],['.pi-time','time'],['.pi-restv','rest'],['.pi-repsmax','reps']];
+  const LIM=[['.pi-weight','weight'],['.pi-reps','reps'],['.pi-sets','sets'],['.pi-time','time'],['.pi-restv','rest']];
   LIMITS.pct=200;
   const items=[]; let bad=false;
   $$('#dItems .pi').forEach(el=>{
@@ -3205,11 +3201,10 @@ function saveDay(){
     items.push({name:nm, reps:num(g('.pi-reps').value), sets:num(g('.pi-sets').value), weight:isPct?null:wv2, pct:isPct?wv2:null, src:(D.items[+el.dataset.i]||{}).src==='m'?'m':'c',
       time:minOut(g('.pi-time').value), notes:g('.pi-notes').value.trim(),
       rest: rv==='' ? null : (num(rv)===null ? 0 : Math.round(num(rv)*60)), warm:g('.pi-warmv').checked,
-      repsMax:(()=>{ const a=num(g('.pi-reps').value), b=num(g('.pi-repsmax').value); return a && b && b>a ? b : null; })(),
       test:g('.pi-testv').checked});
   });
   if(bad){ toast('Проверьте выделенные поля: нужно название; вес — до 100 000 кг, повторы и подходы — до 10 000, время — до 6 000 мин, отдых — до 600 мин', null, null, 5000, 'alert'); return; }
-  const final=items.map(it=>({exId:getOrCreateEx(it.name).id, reps:it.reps, sets:it.sets, weight:it.weight, pct:it.pct, src:it.src, time:it.time, notes:it.notes, warm:it.warm, rest:it.rest, repsMax:it.repsMax, test:it.test}));
+  const final=items.map(it=>({exId:getOrCreateEx(it.name).id, reps:it.reps, sets:it.sets, weight:it.weight, pct:it.pct, src:it.src, time:it.time, notes:it.notes, warm:it.warm, rest:it.rest, test:it.test}));
   let target=p.folders.find(f=>f.id===D.folderId) || p.folders[0];
   if(!target){ target={id:nid('prog'), name:'Неделя 1', days:[]}; p.folders.push(target); }
   let day=null;
@@ -3236,22 +3231,59 @@ function planCtx(){
   if(!pl || !DB.active.wId) return null;
   return findDay(pl.dayId);
 }
-// какие пункты плана уже сделаны: по числу записей этого упражнения в идущей тренировке
-// выполнение плана по подходам: у пункта «4 подхода» — нужно 4 записанных подхода этого упражнения
-// выполнение плана по подходам. Разминочные пункты закрываются разминочными подходами, рабочие — рабочими.
+/* Выполнение плана по подходам. Каждый записанный подход (по времени) засчитывается в пункт того же
+   упражнения и типа (разминка / тест 1ПМ / рабочий), где ещё есть место. Если таких пунктов несколько —
+   например, тяжёлый и лёгкий блок одного упражнения, — в тот, чей вес ближе к весу подхода, потом —
+   чьи повторы ближе, при равенстве — в более ранний. Поэтому порядок выполнения блоков не важен.
+   Тестовый подход без тестового пункта считается рабочим. st.byRec: id записи → номер пункта. */
 function planStatus(x){
-  // пулы: разминка → разминочные пункты, тест 1ПМ → тестовые, остальное → рабочие
-  const w=activeW(), pool={work:new Map(), warm:new Map(), test:new Map()};
-  (w ? recsOfW(w.id) : []).forEach(r=>{ const m=r.warm?pool.warm:r.t1?pool.test:pool.work; m.set(r.exId, (m.get(r.exId)||0)+setUnits(r)); });
-  // тестовый подход без тестового пункта засчитываем как рабочий
-  pool.test.forEach((v,exId)=>{ if(!x.d.items.some(it=>it.test && it.exId===exId)){ pool.work.set(exId,(pool.work.get(exId)||0)+v); pool.test.delete(exId); } });
-  return x.d.items.map(it=>{
-    const m=it.warm?pool.warm:it.test?pool.test:pool.work;
-    const need=Math.max(1, Math.round(it.sets||1));
-    const a=m.get(it.exId)||0, done=Math.min(need, a);
-    m.set(it.exId, a-done);
-    return {need, done, ok: done>=need, warm:!!it.warm};
+  const items=x.d.items, w=activeW();
+  const typeOf=it=>it.warm?'warm':it.test?'test':'work';
+  const hasTest=new Set(items.filter(it=>it.test && !it.warm).map(it=>it.exId));
+  const need=items.map(it=>Math.max(1, Math.round(it.sets||1))), done=items.map(()=>0), byRec=new Map();
+  let pw=null;                       // плановые веса пунктов — считаем, только когда есть из чего выбирать
+  (w ? recsOfW(w.id) : []).forEach(r=>{
+    const t = r.warm ? 'warm' : (r.t1 && hasTest.has(r.exId)) ? 'test' : 'work';
+    const cand=[]; items.forEach((it,k)=>{ if(it.exId===r.exId && typeOf(it)===t) cand.push(k); });
+    for(let u=0; u<setUnits(r) && cand.length; u++){
+      const open=cand.filter(k=>done[k]<need[k]);
+      if(!open.length) break;
+      let k=open[0];
+      if(open.length>1){
+        if(!pw) pw=items.map((it,i)=>{ const pi=planItem(x,i); return pi ? pi.weight : null; });
+        let best=Infinity;
+        open.forEach(i=>{ const sc=setScore(r, pw[i], items[i].reps); if(sc<best-1e-9){ best=sc; k=i; } });
+      }
+      done[k]++; byRec.set(r.id, k);
+    }
   });
+  const st=items.map((it,k)=>({need:need[k], done:done[k], ok:done[k]>=need[k], warm:!!it.warm}));
+  st.byRec=byRec;
+  return st;
+}
+// насколько подход не похож на пункт (меньше — ближе): вес важнее повторов; у кого-то нет веса — «средне»
+function setScore(r, pw, preps){
+  let sc=0;
+  if(r.weight && pw) sc+=Math.abs(r.weight-pw)/pw*10;
+  else if(r.weight || pw) sc+=3;
+  if(r.reps && preps) sc+=Math.abs(r.reps-preps)/preps;
+  return sc;
+}
+/* Какой пункт следующий: если последний подход тренировки ушёл в пункт, который ещё не закончен, —
+   продолжаем его (начали лёгкий блок раньше тяжёлого — дальше лёгкий); иначе первый невыполненный.
+   exId — то же, но среди подходов только этого упражнения. */
+function planNextIdx(x, st, exId){
+  const w=activeW();
+  if(w){
+    const rs=recsOfW(w.id).filter(r=>exId==null || r.exId===exId);
+    for(let i=rs.length-1;i>=0;i--){
+      const k=st.byRec.get(rs[i].id);
+      if(k===undefined) continue;
+      if(!st[k].ok) return k;
+      break;
+    }
+  }
+  return st.findIndex((s2,k)=>!s2.ok && (exId==null || x.d.items[k].exId===exId));
 }
 const PLANFOLD_KEY='fitness_plan_folded';
 let planFolded=true;
@@ -3269,7 +3301,7 @@ function renderPlan(){
     box.innerHTML = hasPlanDays() ? `<button class="btn ghost plan-open" data-act="plan-pick">${I('clip')}Тренировка по программе</button>` : '';
     return;
   }
-  const st=planStatus(x), done=st.filter(s=>s.ok).length, next=st.findIndex(s=>!s.ok);
+  const st=planStatus(x), done=st.filter(s=>s.ok).length, next=planNextIdx(x, st);
   const needAll=st.reduce((a,s)=>a+s.need,0), doneAll=st.reduce((a,s)=>a+s.done,0);
   box.innerHTML=`<div class="card plan-card">
     <div class="plan-head" data-act="plan-toggle">
@@ -3317,7 +3349,7 @@ function openPlanPicker(){
 function startPlan(dayId){
   const x=findDay(dayId); if(!x) return;
   if(!DB.active.wId) startWorkout(true);
-  // веса «% 1ПМ» и двойной прогрессии считаются один раз — на всю тренировку.
+  // веса «% 1ПМ» считаются один раз — на всю тренировку.
   // «Продолжить тренировку» того же дня фиксацию не пересчитывает — веса остаются те же.
   const again=!!(DB.active.plan && DB.active.plan.dayId===dayId);
   if(!again) DB.active.plan={dayId, fx:[]};
@@ -3361,17 +3393,45 @@ function fillFromPlan(i, noScroll){
 
 /* ================== ДОБАВИТЬ ПРОШЕДШУЮ ТРЕНИРОВКУ В ПРОГРАММУ ================== */
 let apState=null, lastProgId=null;
+/* Подряд идущие одинаковые подходы (то же упражнение, вес, повторы, время, разминка, тест) → один пункт
+   с суммой подходов: четыре записи «60×10» → «60×10 × 4 подх». Заметки разных подходов — через «; ».
+   Чередование (суперсет А, Б, А, Б) не склеивается — порядок пунктов сохраняется. keyOf — упражнение. */
+function mergeSets(list, keyOf){
+  const out=[];
+  list.forEach(r=>{
+    const units=Math.max(1, Math.round(r.sets||1)), note=cleanName(r.notes), last=out[out.length-1];
+    if(last && last._k===keyOf(r) && (last.weight||0)===(r.weight||0) && (last.reps||0)===(r.reps||0)
+       && (last.time||0)===(r.time||0) && !!last.warm===!!r.warm && !!last.test===!!r.test){
+      last._n+=units;
+      if(note && !last._notes.includes(note)) last._notes.push(note);
+      return;
+    }
+    out.push(Object.assign({}, r, {_k:keyOf(r), _n:units, _notes:note?[note]:[]}));
+  });
+  return out.map(x=>{
+    // одна запись без поля «подходы» (например, кардио по времени) — подходы не выдумываем
+    const o=Object.assign({}, x, {sets: x._n>1 ? x._n : x.sets, notes:x._notes.join('; ')});
+    delete o._k; delete o._n; delete o._notes;
+    return o;
+  });
+}
+// пункты программы из прошедшей тренировки
+function workoutItems(wId){
+  return mergeSets(recsOfW(wId).map(r=>({exId:r.exId, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||'', warm:!!r.warm, test:isTestRec(r)})), r=>r.exId)
+    .map(it=>Object.assign(it, {rest:null}));
+}
 function openAddToProg(wId){
   const w=wById(wId); if(!w) return;
   const recs=recsOfW(wId);
   if(!recs.length){ toast('В тренировке нет записей'); return; }
+  const nI=workoutItems(wId).length, nE=new Set(recs.map(r=>r.exId)).size;
   const def=(lastProgId && progById(lastProgId)) ? lastProgId : (DB.programs[0] ? DB.programs[0].id : 'new');
   apState={wId};
   const pOpts=DB.programs.map(p=>`<option value="${p.id}"${p.id===def?' selected':''}>${esc(p.name)}</option>`).join('')
     + `<option value="new"${def==='new'?' selected':''}>+ Новая программа</option>`;
   openModal(`<div class="sheet-head"><h2>Добавить в программу</h2>
       <button class="icon-btn" data-act="w-open" data-id="${wId}" aria-label="Назад">${I('x')}</button></div>
-    <p class="muted">${recs.length} ${plural(recs.length,'упражнение','упражнения','упражнений')} из тренировки #${workoutNumber(wId)} (${fmtDate(w.start)}) — с весами, повторами и подходами.</p>
+    <p class="muted">${nE} ${plural(nE,'упражнение','упражнения','упражнений')} (${nI} ${plural(nI,'пункт','пункта','пунктов')}) из тренировки #${workoutNumber(wId)} (${fmtDate(w.start)}) — с весами, повторами и подходами. Одинаковые подходы подряд склеиваются в один пункт.</p>
     <label for="apProg">Программа</label><select id="apProg">${pOpts}</select>
     <div id="apProgNewWrap"><label for="apProgName">Название новой программы</label>
       <input id="apProgName" placeholder="Например: Верх / Низ" autocomplete="off" autocapitalize="sentences"></div>
@@ -3422,8 +3482,7 @@ function saveAddToProg(){
   if(!name){ markBad($('#apName'),true); toast('Введите название тренировки'); return; }
   if(newP){ p.id=nid('prog'); DB.programs.push(p); }
   if(newF){ f.id=nid('prog'); p.folders.push(f); }
-  f.days.push({id:nid('prog'), name,
-    items:recsOfW(w.id).map(r=>({exId:r.exId, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||'', warm:!!r.warm, rest:null}))});
+  f.days.push({id:nid('prog'), name, items:workoutItems(w.id)});
   lastProgId=p.id; apState=null;
   save(); closeModal(); refresh();
   const pid=p.id;
@@ -3496,7 +3555,7 @@ function buildProgramRows(progs){
         if(!d.items.length){ rows.push([p.name,f.name,d.name,...E(9)]); return; }
         d.items.forEach(it=>{
           const e=exById(it.exId);
-          rows.push([p.name, f.name, d.name, e?e.name:'?', it.pct?dec(it.pct)+'%'+(it.src==='m'?' ручной':''):dec(it.weight), it.repsMax?dec(it.reps)+'-'+dec(it.repsMax):dec(it.reps), dec(it.sets),
+          rows.push([p.name, f.name, d.name, e?e.name:'?', it.pct?dec(it.pct)+'%'+(it.src==='m'?' ручной':''):dec(it.weight), dec(it.reps), dec(it.sets),
             it.time?dec(round(it.time/60,2)):'', it.rest===0?'0':(it.rest?dec(round(it.rest/60,2)):''), it.warm?'да':'', it.test?'да':'', it.notes||'']);
         });
       });
@@ -4030,9 +4089,8 @@ function parsePrograms(rows){
     };
     // «70%» в колонке веса — процент от 1ПМ
     let pct=null, src='c';
-    // «6-8» в повторах — диапазон для двойной прогрессии
-    let repsMax=null;
-    { const m2=String(raw.reps).match(/^\s*(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)\s*$/); if(m2){ raw.reps=m2[1]; const b=num(m2[2]); if(b && b>num(m2[1])) repsMax=b; } }
+    // «6-8» в повторах (старые таблицы с диапазоном) — берём нижнюю границу
+    { const m2=String(raw.reps).match(/^\s*(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)\s*$/); if(m2) raw.reps=m2[1]; }
     if(/%/.test(raw.weight)){
       // «70%» — от текущего 1ПМ, «70% ручной» — от ручного; старые пометки «авто»/«лучший» → текущий
       if(/ручн|manual/i.test(raw.weight)) src='m';
@@ -4047,7 +4105,7 @@ function parsePrograms(rows){
     let rest=null;
     if(rs!==''){ const v=Number(rs); if(isFinite(v) && v>=0 && v<=LIMITS.rest*(unit.rest==='s'?60:1)) rest=Math.round(unit.rest==='s'?v:v*60); }
     const tv=normKey(g('test'));
-    d.items.push({exName, reps, sets, weight, pct, src, repsMax, test: tv==='да'||tv==='1'||tv==='+'||tv==='yes', time, notes:g('notes'), rest, warm: wv==='да'||wv==='1'||wv==='+'||wv==='yes'});
+    d.items.push({exName, reps, sets, weight, pct, src, test: tv==='да'||tv==='1'||tv==='+'||tv==='yes', time, notes:g('notes'), rest, warm: wv==='да'||wv==='1'||wv==='+'||wv==='yes'});
   }
   return {programs:progs, errors, period:''};
 }
@@ -4063,7 +4121,7 @@ function programFromRecords(rows){
   const folders=[...weeks.keys()].sort((a,b)=>a-b).map((k,wi)=>({
     name:`Неделя ${wi+1}`,
     days:weeks.get(k).map((g,j)=>({name:`Тренировка ${j+1}`,
-      items:g.recs.map(r=>({exName:r.exName, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||'', warm:!!r.warm}))}))
+      items:mergeSets(g.recs.map(r=>({exName:r.exName, reps:r.reps, sets:r.sets, weight:r.weight, time:r.time, notes:r.notes||'', warm:!!r.warm, test:!!r.t1})), r=>normKey(r.exName))}))
   }));
   const G=P.groups;
   return {programs: folders.length ? [{name:'', folders}] : [], errors:P.errors,
@@ -4118,7 +4176,7 @@ function applyProgramImport(PP, nameOv, replace){
   PP.programs.forEach(pp=>{
     const name = nameOv || pp.name || `Программа ${fmtDate(Date.now())}`;
     const folders=pp.folders.map(f=>({id:nid('prog'), name:f.name, days:f.days.map(d=>({id:nid('prog'), name:d.name,
-      items:d.items.map(it=>({exId:getOrCreateEx(it.exName).id, reps:it.reps, sets:it.sets, weight:it.weight, pct:it.pct||null, src:it.src==='m'?'m':'c', repsMax:it.repsMax||null, test:!!it.test, time:it.time, notes:it.notes||'', warm:!!it.warm, rest:it.rest!=null?it.rest:null}))}))}));
+      items:d.items.map(it=>({exId:getOrCreateEx(it.exName).id, reps:it.reps, sets:it.sets, weight:it.weight, pct:it.pct||null, src:it.src==='m'?'m':'c', test:!!it.test, time:it.time, notes:it.notes||'', warm:!!it.warm, rest:it.rest!=null?it.rest:null}))}))}));
     const old = replace ? DB.programs.find(p=>normKey(p.name)===normKey(name)) : null;
     if(old){ old.name=name; old.folders=folders; replaced++; lastId=old.id; }
     else{
@@ -4253,6 +4311,7 @@ document.addEventListener('click', e=>{
     case 'w-rename-active':  if(DB.active.wId) renameWorkout(DB.active.wId); break;
     case 'w-label-save':     saveWorkoutLabel(id); break;
     case 'auto-src':         setAutoSrc(el.dataset.src); break;
+    case 'prev-toggle':      togglePrev(); break;
     case 'sw-toggle':        swToggle(); break;
     case 'w-export':         openWorkoutExport(id); break;
     case 'sum-share':        shareSummary(id); break;
