@@ -562,24 +562,53 @@ function ask(html, okLabel, danger, cancelLabel){
       if(!b && e.target!==dlg) return;
       e.stopPropagation();
       dlg.classList.remove('show'); dlg.onclick=null; dlg.innerHTML='';
-      res(b ? b.dataset.r==='1' : false);
+      res(b ? b.dataset.r==='1' : null);   // нажатие мимо окна — null («передумал»)
     };
   });
 }
 
 let editReturnW=null;
-function openModal(html){
+/* Несохранённые изменения. При открытии окна запоминаем значения его полей; при закрытии
+   (крестик, «Отмена», нажатие мимо окна) сравниваем. Если что-то поменяли — спрашиваем «Сохранить?».
+   key — у окна, которое перерисовывается (редактор тренировки программы), чтобы не терять исходное состояние. */
+const modalBase={};
+let modalKey=null;
+function formState(){
+  return JSON.stringify($$('#modalSheet input, #modalSheet select, #modalSheet textarea')
+    .filter(el=>!el.readOnly && el.type!=='file' && !el.closest('.suggest'))
+    .map(el=>el.type==='checkbox'?el.checked:el.value));
+}
+function openModal(html, key){
   const sh=$('#modalSheet');
   sh.innerHTML=html;
   $('#modal').classList.add('show');
   sh.scrollTop=0;
+  modalKey=key||'_';
+  if(!key || modalBase[key]===undefined) modalBase[modalKey]=formState();
 }
 function closeModal(){
   $('#modal').classList.remove('show');
   $('#modalSheet').innerHTML='';
   editReturnW=null;
+  for(const k in modalBase) delete modalBase[k];
+  modalKey=null;
 }
-$('#modal').addEventListener('click', e=>{ if(e.target.id==='modal') closeModal(); });
+function modalSaveBtn(){ return document.querySelector('#modalSheet [data-act$="-save"], #modalSheet [data-act="rest-custom-start"]'); }
+function modalDirty(){
+  if(!$('#modal').classList.contains('show') || !modalSaveBtn()) return false;
+  return modalBase[modalKey]!==undefined && modalBase[modalKey]!==formState();
+}
+let guardBusy=false;
+async function guardClose(proceed){
+  if(guardBusy) return;
+  if(!modalDirty()){ proceed(); return; }
+  guardBusy=true;
+  const r=await ask('Есть несохранённые изменения. Сохранить их?','Сохранить',false,'Не сохранять');
+  guardBusy=false;
+  if(r===true){ const b=modalSaveBtn(); if(b) b.click(); }
+  else if(r===false) proceed();
+}
+$('#modal').addEventListener('click', e=>{ if(e.target.id==='modal') guardClose(closeModal); });
 
 /* ---- предупреждения: копия и запуск с экрана «Домой» ---- */
 function backupWarnHtml(){
@@ -960,12 +989,12 @@ function saveRecord(){
   // тест 1ПМ: этот подход становится ручным 1ПМ упражнения
   let testMsg='';
   if(testOn && !warmOn){
-    if(weight && reps && reps<=10){
+    if(weight && reps && reps<=50){
       const before=manualOrm(ex.id);
       ex.orm={w:weight, r:Math.round(reps), ts}; pushOrmHist(ex,'test');
       const v=round(e1rm(weight,Math.round(reps)),1);
-      testMsg=`Тест: 1ПМ ≈ ${fmtNum(v)} кг${before?` (было ${fmtNum(round(before,1))})`:''}`;
-    } else testMsg='Тест 1ПМ: нужен вес и до 10 повторов — 1ПМ не изменён';
+      testMsg=`Тест: 1ПМ ≈ ${fmtNum(v)} кг${before?` (было ${fmtNum(round(before,1))})`:''}${reps>10?' · много повторов, расчёт приблизительный':''}`;
+    } else testMsg='Тест 1ПМ: укажите вес и повторы — 1ПМ не изменён';
     setTest(false);
   }
   lastExKey=normKey(ex.name);
@@ -1611,7 +1640,7 @@ function openOrmEdit(exIdOrName, back){
   const name = ex ? ex.name : cleanName(exIdOrName);
   const m=ex && ex.orm, a=ex ? autoOrm(ex.id) : 0, ar=ex ? autoOrmRec(ex.id) : null;
   openModal(`<div class="sheet-head"><h2>1ПМ · ${esc(name)}</h2><button class="icon-btn" data-act="orm-cancel" aria-label="Закрыть">${I('x')}</button></div>
-    <p class="muted">Укажите рабочий вес и максимум повторов, который вы сделаете с ним сейчас — лучше от 1 до 8. Чем меньше повторов, тем точнее.</p>
+    <p class="muted">Укажите рабочий вес и максимум повторов, который вы сделаете с ним сейчас. Точнее всего — до 8 повторов; больше тоже можно, но расчёт будет приблизительным.</p>
     <div class="grid2">
       <div><label for="ormW">Вес, кг</label><input id="ormW" inputmode="decimal" value="${m?esc(inVal(m.w)):''}" placeholder="${ar?esc(inVal(ar.weight)):'0'}"></div>
       <div><label for="ormR">Повторы на максимум</label><input id="ormR" inputmode="numeric" value="${m?m.r:''}" placeholder="${ar?Math.min(ar.reps,10):'5'}"></div>
@@ -1629,15 +1658,15 @@ function openOrmEdit(exIdOrName, back){
 }
 function ormPreview(){
   const w=num($('#ormW')&&$('#ormW').value), r=num($('#ormR')&&$('#ormR').value), el=$('#ormPrev'); if(!el) return;
-  if(w && r && r>=1 && r<=10) el.innerHTML=`1ПМ ≈ <b>${fmtNum(round(e1rm(w,Math.round(r)),1))} кг</b>${r>8?' · больше 8 повторов — расчёт грубее':''}`;
-  else el.textContent = r>10 ? 'Повторов должно быть не больше 10' : '1ПМ появится после ввода';
+  if(w && r && r>=1 && r<=50) el.innerHTML=`1ПМ ≈ <b>${fmtNum(round(e1rm(w,Math.round(r)),1))} кг</b>${r>12?' · много повторов — расчёт приблизительный':r>8?' · больше 8 повторов — расчёт грубее':''}`;
+  else el.textContent = r>50 ? 'Слишком много повторов' : '1ПМ появится после ввода';
 }
 document.addEventListener('input', e=>{ if(e.target.id==='ormW'||e.target.id==='ormR') ormPreview(); });
 function ormSave(name){
   const wI=$('#ormW'), rI=$('#ormR'), w=num(wI.value), r=num(rI.value);
-  const badW=!w || w<=0 || w>1000, badR=!r || r<1 || r>10 || Math.round(r)!==r;
+  const badW=!w || w<=0 || w>1000, badR=!r || r<1 || r>50 || Math.round(r)!==r;
   markBad(wI,badW); markBad(rI,badR);
-  if(badW||badR){ toast('Вес — больше 0, повторы — целое число от 1 до 10', null, null, 3500, 'alert'); return; }
+  if(badW||badR){ toast('Вес — больше 0, повторы — целое число от 1 до 50', null, null, 3500, 'alert'); return; }
   const ex=getOrCreateEx(name);
   ex.orm={w, r, ts:Date.now()}; pushOrmHist(ex,'manual');
   save();
@@ -2899,6 +2928,7 @@ function openDayEdit(id, folderId){
         rest:restIn(it.rest), warm:!!it.warm, repsMax:it.repsMax?inVal(it.repsMax):'', test:!!it.test}; }) : []
   };
   if(!dayDraft.items.length) dayDraft.items.push(emptyItem());
+  delete modalBase.day;                 // новое открытие редактора — новое исходное состояние
   renderDayEdit(x ? null : 0);
 }
 function renderDayEdit(focusIdx){
@@ -2948,7 +2978,7 @@ function renderDayEdit(focusIdx){
     <div class="grid2" style="margin-top:14px">
       <button class="btn ghost" data-act="day-edit-cancel">Отмена</button>
       <button class="btn" data-act="day-save">Сохранить</button>
-    </div>`);
+    </div>`, 'day');
   sh.scrollTop=keep;
   if(focusIdx!=null){
     const el=$$('#dItems .pi')[focusIdx];
@@ -3996,7 +4026,7 @@ document.addEventListener('click', e=>{
   const id=el.dataset.id!==undefined ? +el.dataset.id : null;
   switch(act){
     case 'tab':              go(el.dataset.tab); break;
-    case 'close-modal':      closeModal(); break;
+    case 'close-modal':      guardClose(closeModal); break;
     case 'step':             stepInput(el.dataset.for, +el.dataset.d); break;
     case 'save':             saveRecord(); break;
     case 'clear-form':       clearForm(true); break;
@@ -4016,7 +4046,7 @@ document.addEventListener('click', e=>{
     case 'rec-save':         saveRecEdit(id); break;
     case 'rec-del':          deleteRec(id); break;
     case 'rec-toform':       recToForm(id); break;
-    case 'rec-cancel':       afterRecEdit(); break;
+    case 'rec-cancel':       guardClose(afterRecEdit); break;
     case 'ex-open':          openHistory(id); break;
     case 'ex-add':           openAddEx(); break;
     case 'ex-add-save':      createEx(); break;
@@ -4026,12 +4056,12 @@ document.addEventListener('click', e=>{
     case 'ex-rename-save':   renameEx(); break;
     case 'ex-del':           deleteEx(); break;
     case 'hist-back':        histEx=null; go('ex'); break;
-    case 'w-open':           openWorkout(id); break;
+    case 'w-open':           guardClose(()=>openWorkout(id)); break;
     case 'w-edit':           openWorkoutEdit(id); break;
     case 'w-edit-save':      saveWorkoutEdit(id); break;
     case 'w-del':            deleteWorkout(id); break;
     case 'warm-toggle':      setWarm(!warmOn); if(warmOn) setTest(false); break;
-    case 'test-toggle':      setTest(!testOn); if(testOn){ setWarm(false); toast('Тест 1ПМ: подход на максимум (до 10 повт) перезапишет 1ПМ', null, null, 3000, 'trophy'); } break;
+    case 'test-toggle':      setTest(!testOn); if(testOn){ setWarm(false); toast('Тест 1ПМ: этот подход на максимум перезапишет 1ПМ', null, null, 3000, 'trophy'); } break;
     case 'ex-step':          setExStep(id, +el.dataset.v); break;
     case 'ex-step-menu':     openStepSheet(histEx); break;
     case 'ar-mode':          setArMode(el.dataset.m); break;
@@ -4047,7 +4077,7 @@ document.addEventListener('click', e=>{
     case 'orm-list':         openOrmList(); break;
     case 'orm-edit':         openOrmEdit(id); break;
     case 'orm-save':         ormSave(el.dataset.name); break;
-    case 'orm-cancel':       ormCancel(); break;
+    case 'orm-cancel':       guardClose(ormCancel); break;
     case 'orm-clear':        ormClear(id); break;
     case 'pi-src':           toggleItemSrc(+el.dataset.i, el.dataset.src); break;
     case 'di-copy':          dayItemCopy(+el.dataset.i); break;
@@ -4099,7 +4129,7 @@ document.addEventListener('click', e=>{
     case 'day-open':         openDay(id); break;
     case 'day-add':          openDayEdit(null, id); break;
     case 'day-edit':         openDayEdit(id); break;
-    case 'day-edit-cancel':  dayEditCancel(); break;
+    case 'day-edit-cancel':  guardClose(dayEditCancel); break;
     case 'day-save':         saveDay(); break;
     case 'day-dup':          dupDay(id); break;
     case 'day-del':          deleteDay(id); break;
