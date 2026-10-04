@@ -842,7 +842,7 @@ function hintCtx(ex){
       const curK = nextChip>=0 ? chips[nextChip].k : idx[idx.length-1];
       plan={day:x.d.name, tmp:!!x.tmp, chips, next:nextChip, need, done:wdone,
         it: nextChip>=0 ? chips[nextChip].it : planItem(x, idx[idx.length-1]),
-        note: cleanName(x.d.items[curK].notes)};
+        note: cleanName(x.d.items[curK].notes), rest: x.d.items[curK].rest};
     }
   }
   return {cur, prev, today, done, prevSets, prevWarm, warmDone, plan};
@@ -1034,7 +1034,7 @@ function renderLastHint(){
   if(c.plan){
     html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}${c.plan.tmp?'Повтор':'Программа'} · <b>${c.plan.done} из ${c.plan.need}</b></div>${sw('plan')}</div>
       <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>
-      ${c.plan.note?`<button type="button" class="hint-note-line" data-act="hint-note" title="Показать заметку целиком">«${esc(c.plan.note)}»</button>`:''}`;
+      ${(c.plan.note || c.plan.rest!=null) ? `<div class="hint-meta">${c.plan.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(c.plan.rest)}</span>`:''}${c.plan.note?`<button type="button" class="hint-note-line" data-act="hint-note" title="Показать заметку целиком">«${esc(c.plan.note)}»</button>`:''}</div>` : ''}`;
   }
   if(!c.prev && c.today && prevOpen){
     html+=`<div class="hint-lbl">Раньше не делали · сегодня <b>${c.done} ${plural(c.done,'рабочий подход','рабочих подхода','рабочих подходов')}</b>${c.warmDone?` + ${c.warmDone} разм.`:''}</div>`;

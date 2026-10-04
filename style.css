@@ -728,3 +728,8 @@ button.prev-lbl .i.sm{margin:0;color:var(--muted)}
 .top-save:active{opacity:.6}
 .top-save .i{width:15px;height:15px;color:#5fd68f}
 .top-save .i.sm{width:13px;height:13px;margin:0;opacity:1}
+/* под подходами: плановый отдых, затем заметка */
+.hint-meta{display:flex;align-items:baseline;gap:8px;margin-top:2px;min-width:0}
+.hint-meta .rest-lbl{flex:none;font-size:13px;font-weight:600}
+.hint-meta .rest-lbl .i.sm{margin:0 3px 0 0}
+.hint-meta .hint-note-line{flex:1;min-width:0;width:auto;padding-top:0}
