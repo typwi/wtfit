@@ -2037,6 +2037,7 @@ const MKINDS=[
   {k:'calf',     name:'Голень (без стороны)',     unit:'см', legacy:true}
 ];
 function allKinds(){ return MKINDS.concat(DB.mkinds); }
+function isCustomKind(k){ return DB.mkinds.some(x=>x.k===k); }
 function visibleKinds(){ return allKinds().filter(k=>!k.legacy || DB.measures.some(m=>m.k===k.k)); }
 function kindOf(k){ return allKinds().find(x=>x.k===k); }
 function mValues(k){ return DB.measures.filter(m=>m.k===k).sort((a,b)=>a.ts-b.ts); }
@@ -2051,46 +2052,70 @@ function deltaHtml(vals, unit){
 function weightExercise(){
   return DB.exercises.find(e=>['вес','вес тела','масса тела','взвешивание'].includes(normKey(e.name)) && DB.records.some(r=>r.exId===e.id));
 }
-/* Силуэт (вид спереди: правая сторона тела — слева на рисунке, как в зеркале у тренера).
-   Нажатие на часть тела открывает мерку: значение, график, история. */
+/* Силуэт. Правая сторона тела — справа на экране (как смотришь на себя с телефоном в руках).
+   Вместо закрашенных областей — линии обхвата: где именно мерить. Синяя линия — замер есть,
+   серая пунктирная — ещё нет. Нажатие на линию или подпись открывает мерку. */
+// контур правой половины тела (x>150), сверху вниз; левая половина — зеркально
+const BODY_HALF=[[150,56],[159,58],[161,70],[176,76],[192,80],[204,86],[210,98],[213,114],[214,130],[216,150],[218,163],[222,180],
+  [226,205],[228,222],[232,232],[233,246],[227,253],[221,248],[219,234],[216,222],[211,200],[206,178],[203,163],[200,142],[196,113],
+  [194,126],[190,150],[186,172],[188,193],[194,212],[196,230],[196,252],[192,282],[187,312],[185,324],[189,346],[186,372],[180,392],
+  [185,404],[170,408],[165,402],[166,392],[164,378],[162,350],[162,320],[158,282],[154,252],[150,242]];
+function smoothClosed(pts){
+  const n=pts.length, P=i=>pts[(i+n)%n];
+  let d=`M${pts[0][0]},${pts[0][1]}`;
+  for(let i=0;i<n;i++){
+    const p0=P(i-1), p1=P(i), p2=P(i+1), p3=P(i+2), t=0.5/3*2;
+    const c1=[p1[0]+(p2[0]-p0[0])*t/2, p1[1]+(p2[1]-p0[1])*t/2];
+    const c2=[p2[0]-(p3[0]-p1[0])*t/2, p2[1]-(p3[1]-p1[1])*t/2];
+    d+=`C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${p2[0]},${p2[1]}`;
+  }
+  return d+'Z';
+}
+function bodyOutline(){
+  const right=BODY_HALF, left=right.slice(1,-1).reverse().map(([x,y])=>[300-x,y]);
+  return smoothClosed(right.concat(left));
+}
+// линии обхвата: [x1, x2, y], подпись [x, y, выравнивание]
 const BODY_ZONES=[
-  // k, фигура, подпись: [x, y, выравнивание]
-  {k:'neck',      d:'M139,62h22v16h-22z', rx:6,                        lab:[170,58,'start']},
-  {k:'shoulders', d:'M96,80 Q150,70 204,80 L206,98 Q150,90 94,98 Z',   lab:[214,80,'start']},
-  {k:'chest',     d:'M100,100 Q150,93 200,100 L198,142 Q150,148 102,142 Z', lab:[150,126,'middle']},
-  {k:'waist',     d:'M104,146 Q150,152 196,146 L192,186 Q150,190 108,186 Z', lab:[150,171,'middle']},
-  {k:'hips',      d:'M106,190 Q150,194 194,190 L198,226 Q150,232 102,226 Z', lab:[150,214,'middle']},
-  {k:'biceps_r',  d:'M74,96 Q86,88 94,98 L92,156 Q82,162 70,156 Z',    lab:[62,128,'end']},
-  {k:'biceps_l',  d:'M226,96 Q214,88 206,98 L208,156 Q218,162 230,156 Z', lab:[238,128,'start']},
-  {k:'forearm_r', d:'M70,162 Q81,166 92,162 L86,222 Q76,226 64,222 Z', lab:[56,194,'end']},
-  {k:'forearm_l', d:'M230,162 Q219,166 208,162 L214,222 Q224,226 236,222 Z', lab:[244,194,'start']},
-  {k:'thigh_r',   d:'M104,232 Q126,238 148,234 L144,320 Q128,326 112,320 Z', lab:[96,280,'end']},
-  {k:'thigh_l',   d:'M196,232 Q174,238 152,234 L156,320 Q172,326 188,320 Z', lab:[204,280,'start']},
-  {k:'calf_r',    d:'M112,328 Q128,334 144,328 L140,398 Q130,402 118,398 Z', lab:[104,364,'end']},
-  {k:'calf_l',    d:'M188,328 Q172,334 156,328 L160,398 Q170,402 182,398 Z', lab:[196,364,'start']}
+  {k:'neck',      x1:139.5, x2:160.5, y:65,  lab:[176,58,'start']},
+  {k:'shoulders', x1:93,    x2:207,   y:93,  lab:[236,86,'start']},
+  {k:'chest',     x1:105,   x2:195,   y:120, lab:[150,120,'middle']},
+  {k:'waist',     x1:114,   x2:186,   y:172, lab:[150,172,'middle']},
+  {k:'hips',      x1:106,   x2:194,   y:215, lab:[150,215,'middle']},
+  {k:'biceps_r',  x1:199.5, x2:214.5, y:135, lab:[238,135,'start']},
+  {k:'biceps_l',  x1:85.5,  x2:100.5, y:135, lab:[62,135,'end']},
+  {k:'forearm_r', x1:207.5, x2:222.8, y:186, lab:[240,190,'start']},
+  {k:'forearm_l', x1:77.2,  x2:92.5,  y:186, lab:[60,190,'end']},
+  {k:'thigh_r',   x1:155.5, x2:194.5, y:265, lab:[204,280,'start']},
+  {k:'thigh_l',   x1:105.5, x2:144.5, y:265, lab:[96,280,'end']},
+  {k:'calf_r',    x1:162,   x2:188.5, y:347, lab:[198,350,'start']},
+  {k:'calf_l',    x1:111.5, x2:138,   y:347, lab:[102,350,'end']}
 ];
 function bodySvg(){
-  const last=k=>{ const v=mValues(k); return v[v.length-1]; };
   const zones=BODY_ZONES.map(z=>{
-    const kd=kindOf(z.k), l=last(z.k);
-    const vals=mValues(z.k), d=vals.length>1 ? round(vals[vals.length-1].v-vals[vals.length-2].v,1) : 0;
-    const [x,y,a]=z.lab;
-    const val = l ? fmtNum(l.v) : '+';
-    const hx = a==='end' ? x-46 : a==='middle' ? x-24 : x;
+    const kd=kindOf(z.k), vals=mValues(z.k), l=vals[vals.length-1];
+    const d=vals.length>1 ? round(vals[vals.length-1].v-vals[vals.length-2].v,1) : 0;
+    const [x,y,a]=z.lab, mid=(z.x1+z.x2)/2, bulge=Math.max(2.5,(z.x2-z.x1)*0.07);
+    const inside = a==='middle';
+    // зона нажатия: линия + подпись
+    const hx1=Math.min(z.x1-4, a==='end'?x-46:x-24), hx2=Math.max(z.x2+4, a==='start'?x+50:x+24);
     return `<g class="bz${l?' has':''}" data-act="m-open" data-k="${z.k}">
-      <rect x="${hx}" y="${y-17}" width="48" height="32" fill="transparent"/>
-      <path d="${z.d}"/>
-      <text x="${x}" y="${y-5}" text-anchor="${a}" class="bz-n">${esc(kd.short)}</text>
-      <text x="${x}" y="${y+9}" text-anchor="${a}" class="bz-v">${val}${d?`<tspan class="bz-d"> ${d>0?'+':'−'}${fmtNum(Math.abs(d))}</tspan>`:''}</text>
+      <rect x="${hx1}" y="${Math.min(z.y,y)-17}" width="${hx2-hx1}" height="${Math.abs(z.y-y)+32}" fill="transparent"/>
+      <path class="bz-back" d="M${z.x1},${z.y} Q${mid},${z.y-bulge*1.6} ${z.x2},${z.y}"/>
+      <path class="bz-line" d="M${z.x1},${z.y} Q${mid},${z.y+bulge*2} ${z.x2},${z.y}"/>
+      <text x="${x}" y="${inside?y-6:y-4}" text-anchor="${a}" class="bz-n">${esc(kd.short)}</text>
+      <text x="${x}" y="${inside?y+15:y+10}" text-anchor="${a}" class="bz-v">${l?fmtNum(l.v):'+'}${d?`<tspan class="bz-d"> ${d>0?'+':'−'}${fmtNum(Math.abs(d))}</tspan>`:''}</text>
     </g>`;
   }).join('');
-  return `<svg class="body-svg" viewBox="0 0 300 410" role="img" aria-label="Замеры тела">
-    <text x="20" y="18" class="bz-side">ПРАВАЯ</text><text x="280" y="18" text-anchor="end" class="bz-side">ЛЕВАЯ</text>
+  return `<svg class="body-svg" viewBox="0 0 300 414" role="img" aria-label="Замеры тела">
+    <text x="16" y="16" class="bz-side">ЛЕВАЯ</text><text x="284" y="16" text-anchor="end" class="bz-side">ПРАВАЯ</text>
     <g class="body-base">
-      <circle cx="150" cy="38" r="22"/>
-      <path d="M94,98 Q150,86 206,98 L198,226 Q150,236 102,226 Z"/>
-      <circle cx="76" cy="232" r="9"/><circle cx="224" cy="232" r="9"/>
-      <path d="M118,398 h22 l4,8 h-30 z"/><path d="M160,398 h22 l4,8 h-30 z"/>
+      <ellipse cx="150" cy="34" rx="18" ry="22"/>
+      <path d="${bodyOutline()}"/>
+    </g>
+    <g class="body-detail">
+      <path d="M150,96 V236"/><path d="M118,104 Q134,112 148,106"/><path d="M182,104 Q166,112 152,106"/>
+      <path d="M126,142 Q150,150 174,142"/>
     </g>
     ${zones}
   </svg>`;
@@ -2105,10 +2130,10 @@ function measuresHtml(){
       <div class="val">${l?fmtM(l.v,kd.unit):'—'}</div><div class="m-tile-d">${l?fmtDate(l.ts)+' '+deltaHtml(v,kd.unit):'нажмите, чтобы записать'}</div></div>`;
   }).join('')+'</div>';
   html+=`<div class="card body-card">${bodySvg()}
-    <p class="muted body-hint">Нажмите на часть тела, чтобы записать обхват и посмотреть прогресс. Вид спереди: правая сторона тела — слева.</p></div>`;
+    <p class="muted body-hint">Линии показывают, где мерить обхват. Нажмите на линию или подпись — запишете замер и увидите прогресс.</p></div>`;
   html+=`<button class="btn big" data-act="m-add-all">${I('plus')}Записать все замеры сразу</button>`;
   // свои мерки и старые без стороны
-  const extra=visibleKinds().filter(k=>k.legacy || String(k.k).startsWith('c'));
+  const extra=visibleKinds().filter(k=>k.legacy || isCustomKind(k.k));
   if(extra.length){
     html+=`<div class="section-head"><span>Другие мерки</span></div><div class="card list-card">`;
     extra.forEach(kd=>{
@@ -2159,7 +2184,7 @@ function openMeasure(k){
         <div class="rec-main"><div class="rec-name">${fmtM(m.v,kd.unit)}</div>
           <div class="rec-desc">${prev&&d?(d>0?'+':'−')+fmtNum(Math.abs(d))+' '+kd.unit:''}</div></div>
         <div class="rec-side">${fmtDate(m.ts)}</div></div>`;}).join('')}</div>`:''}
-    ${k.startsWith('c')?`<button class="btn danger big" data-act="m-kind-del" data-k="${esc(k)}">${I('trash')}Удалить мерку</button>`:''}`);
+    ${isCustomKind(k)?`<button class="btn danger big" data-act="m-kind-del" data-k="${esc(k)}">${I('trash')}Удалить мерку</button>`:''}`);
 }
 function mDateTs(s){ const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(+m[1],+m[2]-1,+m[3],12,0).getTime() : null; }
 function mValOk(inp){
@@ -2223,12 +2248,12 @@ function saveMeasureKind(){
   const name=cleanName($('#mkName').value), unit=cleanName($('#mkUnit').value)||'см';
   if(!name){ markBad($('#mkName'),true); toast('Введите название'); return; }
   if(allKinds().some(k=>normKey(k.name)===normKey(name))){ toast('Такая мерка уже есть'); return; }
-  const k='c'+nid('m');
+  const k='custom_'+nid('m');
   DB.mkinds.push({k, name, unit}); save();
   closeModal(); renderStats(); openMeasure(k);
 }
 async function delMeasureKind(k){
-  const kd=kindOf(k); if(!kd || !k.startsWith('c')) return;
+  const kd=kindOf(k); if(!kd || !isCustomKind(k)) return;
   const n=mValues(k).length;
   if(!await ask(`Удалить мерку «${esc(kd.name)}»${n?` и ${n} ${plural(n,'замер','замера','замеров')}`:''}?`,'Удалить',true)) return;
   DB.mkinds=DB.mkinds.filter(x=>x.k!==k); DB.measures=DB.measures.filter(m=>m.k!==k); save();

@@ -612,9 +612,13 @@ label.check.pi-warm{margin:0 0 10px;font-size:14px}
 .body-svg{width:100%;max-width:420px;display:block;margin:0 auto;height:auto}
 .body-base > *{fill:#1f2430;stroke:#2f3647;stroke-width:1.5}
 .bz{cursor:pointer}
-.bz path{fill:#2a3142;stroke:#3a4256;stroke-width:1.2;transition:fill .15s}
-.bz.has path{fill:rgba(79,140,255,.35);stroke:#4f8cff}
-.bz:active path{fill:rgba(79,140,255,.6)}
+.body-base > *{fill:#262c3a;stroke:#3a4256;stroke-width:1.4}
+.body-detail path{fill:none;stroke:#323a4c;stroke-width:1.1;stroke-linecap:round}
+.bz-line{fill:none;stroke:#5d6478;stroke-width:2;stroke-dasharray:3 3;stroke-linecap:round}
+.bz-back{fill:none;stroke:#3a4256;stroke-width:1.2;stroke-dasharray:2 3}
+.bz.has .bz-line{stroke:#4f8cff;stroke-width:2.6;stroke-dasharray:none}
+.bz.has .bz-back{stroke:rgba(79,140,255,.45)}
+.bz:active .bz-line{stroke:#9ec4ff}
 .bz-n{font-size:9px;fill:#8b93a7;font-weight:600;font-family:inherit}
 .bz-v{font-size:11.5px;fill:#e8eaed;font-weight:700;font-family:inherit;font-variant-numeric:tabular-nums}
 .bz:not(.has) .bz-v{fill:#4f8cff}
