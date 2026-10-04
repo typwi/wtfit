@@ -606,3 +606,21 @@ label.check.pi-warm{margin:0 0 10px;font-size:14px}
 /* строка «Время, мин» + секундомер — той же высоты, что и обычная подпись, чтобы поля стояли ровно */
 .grid2 .lbl-row{height:15px;align-items:center;overflow:visible}
 .grid2 .lbl-row .sw-btn{padding:2px 7px;margin:-6px 0}
+
+/* силуэт замеров */
+.body-card{padding:10px 8px 12px}
+.body-svg{width:100%;max-width:420px;display:block;margin:0 auto;height:auto}
+.body-base > *{fill:#1f2430;stroke:#2f3647;stroke-width:1.5}
+.bz{cursor:pointer}
+.bz path{fill:#2a3142;stroke:#3a4256;stroke-width:1.2;transition:fill .15s}
+.bz.has path{fill:rgba(79,140,255,.35);stroke:#4f8cff}
+.bz:active path{fill:rgba(79,140,255,.6)}
+.bz-n{font-size:9px;fill:#8b93a7;font-weight:600;font-family:inherit}
+.bz-v{font-size:11.5px;fill:#e8eaed;font-weight:700;font-family:inherit;font-variant-numeric:tabular-nums}
+.bz:not(.has) .bz-v{fill:#4f8cff}
+.bz-d{font-size:9px;fill:#8b93a7;font-weight:600}
+.bz-side{font-size:9px;fill:#5d6478;font-weight:700;letter-spacing:.8px}
+.body-hint{margin:6px 6px 0;text-align:center;line-height:1.4}
+.m-tile{cursor:pointer}
+.m-tile:active{opacity:.7}
+.m-tile-d{font-size:12px;color:var(--muted);margin-top:3px}

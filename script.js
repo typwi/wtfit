@@ -2015,19 +2015,29 @@ function selectWeek(i){
 
 /* ================== ЗАМЕРЫ ТЕЛА ================== */
 const MKINDS=[
-  {k:'weight',   name:'Вес тела',      unit:'кг'},
-  {k:'fat',      name:'Процент жира',  unit:'%'},
-  {k:'neck',     name:'Шея',           unit:'см'},
-  {k:'shoulders',name:'Плечи',         unit:'см'},
-  {k:'chest',    name:'Грудь',         unit:'см'},
-  {k:'waist',    name:'Талия',         unit:'см'},
-  {k:'hips',     name:'Таз (ягодицы)', unit:'см'},
-  {k:'biceps',   name:'Бицепс',        unit:'см'},
-  {k:'forearm',  name:'Предплечье',    unit:'см'},
-  {k:'thigh',    name:'Бедро',         unit:'см'},
-  {k:'calf',     name:'Голень',        unit:'см'}
+  {k:'weight',   name:'Вес тела',          short:'Вес',     unit:'кг'},
+  {k:'fat',      name:'Процент жира',      short:'Жир',     unit:'%'},
+  {k:'neck',     name:'Шея',               short:'Шея',     unit:'см'},
+  {k:'shoulders',name:'Плечи',             short:'Плечи',   unit:'см'},
+  {k:'chest',    name:'Грудь',             short:'Грудь',   unit:'см'},
+  {k:'waist',    name:'Талия',             short:'Талия',   unit:'см'},
+  {k:'hips',     name:'Таз (ягодицы)',     short:'Таз',     unit:'см'},
+  {k:'biceps_r', name:'Бицепс правый',     short:'Бицепс',  unit:'см'},
+  {k:'biceps_l', name:'Бицепс левый',      short:'Бицепс',  unit:'см'},
+  {k:'forearm_r',name:'Предплечье правое', short:'Предпл.', unit:'см'},
+  {k:'forearm_l',name:'Предплечье левое',  short:'Предпл.', unit:'см'},
+  {k:'thigh_r',  name:'Бедро правое',      short:'Бедро',   unit:'см'},
+  {k:'thigh_l',  name:'Бедро левое',       short:'Бедро',   unit:'см'},
+  {k:'calf_r',   name:'Голень правая',     short:'Голень',  unit:'см'},
+  {k:'calf_l',   name:'Голень левая',      short:'Голень',  unit:'см'},
+  // старые мерки без стороны — показываются, только если в них уже есть записи
+  {k:'biceps',   name:'Бицепс (без стороны)',     unit:'см', legacy:true},
+  {k:'forearm',  name:'Предплечье (без стороны)', unit:'см', legacy:true},
+  {k:'thigh',    name:'Бедро (без стороны)',      unit:'см', legacy:true},
+  {k:'calf',     name:'Голень (без стороны)',     unit:'см', legacy:true}
 ];
 function allKinds(){ return MKINDS.concat(DB.mkinds); }
+function visibleKinds(){ return allKinds().filter(k=>!k.legacy || DB.measures.some(m=>m.k===k.k)); }
 function kindOf(k){ return allKinds().find(x=>x.k===k); }
 function mValues(k){ return DB.measures.filter(m=>m.k===k).sort((a,b)=>a.ts-b.ts); }
 function fmtM(v, unit){ return fmtNum(v)+(unit?' '+unit:''); }
@@ -2041,21 +2051,77 @@ function deltaHtml(vals, unit){
 function weightExercise(){
   return DB.exercises.find(e=>['вес','вес тела','масса тела','взвешивание'].includes(normKey(e.name)) && DB.records.some(r=>r.exId===e.id));
 }
+/* Силуэт (вид спереди: правая сторона тела — слева на рисунке, как в зеркале у тренера).
+   Нажатие на часть тела открывает мерку: значение, график, история. */
+const BODY_ZONES=[
+  // k, фигура, подпись: [x, y, выравнивание]
+  {k:'neck',      d:'M139,62h22v16h-22z', rx:6,                        lab:[170,58,'start']},
+  {k:'shoulders', d:'M96,80 Q150,70 204,80 L206,98 Q150,90 94,98 Z',   lab:[214,80,'start']},
+  {k:'chest',     d:'M100,100 Q150,93 200,100 L198,142 Q150,148 102,142 Z', lab:[150,126,'middle']},
+  {k:'waist',     d:'M104,146 Q150,152 196,146 L192,186 Q150,190 108,186 Z', lab:[150,171,'middle']},
+  {k:'hips',      d:'M106,190 Q150,194 194,190 L198,226 Q150,232 102,226 Z', lab:[150,214,'middle']},
+  {k:'biceps_r',  d:'M74,96 Q86,88 94,98 L92,156 Q82,162 70,156 Z',    lab:[62,128,'end']},
+  {k:'biceps_l',  d:'M226,96 Q214,88 206,98 L208,156 Q218,162 230,156 Z', lab:[238,128,'start']},
+  {k:'forearm_r', d:'M70,162 Q81,166 92,162 L86,222 Q76,226 64,222 Z', lab:[56,194,'end']},
+  {k:'forearm_l', d:'M230,162 Q219,166 208,162 L214,222 Q224,226 236,222 Z', lab:[244,194,'start']},
+  {k:'thigh_r',   d:'M104,232 Q126,238 148,234 L144,320 Q128,326 112,320 Z', lab:[96,280,'end']},
+  {k:'thigh_l',   d:'M196,232 Q174,238 152,234 L156,320 Q172,326 188,320 Z', lab:[204,280,'start']},
+  {k:'calf_r',    d:'M112,328 Q128,334 144,328 L140,398 Q130,402 118,398 Z', lab:[104,364,'end']},
+  {k:'calf_l',    d:'M188,328 Q172,334 156,328 L160,398 Q170,402 182,398 Z', lab:[196,364,'start']}
+];
+function bodySvg(){
+  const last=k=>{ const v=mValues(k); return v[v.length-1]; };
+  const zones=BODY_ZONES.map(z=>{
+    const kd=kindOf(z.k), l=last(z.k);
+    const vals=mValues(z.k), d=vals.length>1 ? round(vals[vals.length-1].v-vals[vals.length-2].v,1) : 0;
+    const [x,y,a]=z.lab;
+    const val = l ? fmtNum(l.v) : '+';
+    const hx = a==='end' ? x-46 : a==='middle' ? x-24 : x;
+    return `<g class="bz${l?' has':''}" data-act="m-open" data-k="${z.k}">
+      <rect x="${hx}" y="${y-17}" width="48" height="32" fill="transparent"/>
+      <path d="${z.d}"/>
+      <text x="${x}" y="${y-5}" text-anchor="${a}" class="bz-n">${esc(kd.short)}</text>
+      <text x="${x}" y="${y+9}" text-anchor="${a}" class="bz-v">${val}${d?`<tspan class="bz-d"> ${d>0?'+':'−'}${fmtNum(Math.abs(d))}</tspan>`:''}</text>
+    </g>`;
+  }).join('');
+  return `<svg class="body-svg" viewBox="0 0 300 410" role="img" aria-label="Замеры тела">
+    <text x="20" y="18" class="bz-side">ПРАВАЯ</text><text x="280" y="18" text-anchor="end" class="bz-side">ЛЕВАЯ</text>
+    <g class="body-base">
+      <circle cx="150" cy="38" r="22"/>
+      <path d="M94,98 Q150,86 206,98 L198,226 Q150,236 102,226 Z"/>
+      <circle cx="76" cy="232" r="9"/><circle cx="224" cy="232" r="9"/>
+      <path d="M118,398 h22 l4,8 h-30 z"/><path d="M160,398 h22 l4,8 h-30 z"/>
+    </g>
+    ${zones}
+  </svg>`;
+}
 function measuresHtml(){
   const wx=weightExercise();
   let html = wx ? `<div class="warn-line" data-act="m-migrate">${I('alert')}<span>Вес тела записан как упражнение «${esc(wx.name)}» (${DB.records.filter(r=>r.exId===wx.id).length} зап.) — нажмите, чтобы перенести в замеры. Тренировки с ним перестанут считаться тренировками.</span></div>` : '';
-  html+=`<button class="btn big" style="margin-top:0" data-act="m-add-all">${I('plus')}Записать замеры</button>
-    <div class="card list-card" style="margin-top:12px">`;
-  allKinds().forEach(kd=>{
-    const vals=mValues(kd.k), last=vals[vals.length-1];
-    html+=`<div class="rec-row" data-act="m-open" data-k="${esc(kd.k)}">
-      <div class="rec-main"><div class="rec-name">${esc(kd.name)}</div>
-        <div class="rec-desc">${last?`${fmtDate(last.ts)} ${deltaHtml(vals, kd.unit)}`:'нет замеров'}</div></div>
-      <div class="m-val">${last?fmtM(last.v, kd.unit):'—'}</div>
-      <div class="chev">${I('chev')}</div></div>`;
-  });
-  html+=`</div><button class="btn ghost big" data-act="m-kind-add">${I('plus')}Своя мерка</button>
-    <p class="muted" style="margin:10px 2px">Нажмите на мерку, чтобы увидеть график и историю. Обхваты удобнее мерить утром, в одном и том же месте.</p>`;
+  // вес и жир — плитками
+  html+='<div class="stats-summary">'+['weight','fat'].map(k=>{
+    const kd=kindOf(k), v=mValues(k), l=v[v.length-1];
+    return `<div class="stats-box m-tile" data-act="m-open" data-k="${k}"><div class="lbl">${esc(kd.name)}</div>
+      <div class="val">${l?fmtM(l.v,kd.unit):'—'}</div><div class="m-tile-d">${l?fmtDate(l.ts)+' '+deltaHtml(v,kd.unit):'нажмите, чтобы записать'}</div></div>`;
+  }).join('')+'</div>';
+  html+=`<div class="card body-card">${bodySvg()}
+    <p class="muted body-hint">Нажмите на часть тела, чтобы записать обхват и посмотреть прогресс. Вид спереди: правая сторона тела — слева.</p></div>`;
+  html+=`<button class="btn big" data-act="m-add-all">${I('plus')}Записать все замеры сразу</button>`;
+  // свои мерки и старые без стороны
+  const extra=visibleKinds().filter(k=>k.legacy || String(k.k).startsWith('c'));
+  if(extra.length){
+    html+=`<div class="section-head"><span>Другие мерки</span></div><div class="card list-card">`;
+    extra.forEach(kd=>{
+      const vals=mValues(kd.k), last=vals[vals.length-1];
+      html+=`<div class="rec-row" data-act="m-open" data-k="${esc(kd.k)}">
+        <div class="rec-main"><div class="rec-name">${esc(kd.name)}</div>
+          <div class="rec-desc">${last?`${fmtDate(last.ts)} ${deltaHtml(vals, kd.unit)}`:'нет замеров'}</div></div>
+        <div class="m-val">${last?fmtM(last.v, kd.unit):'—'}</div><div class="chev">${I('chev')}</div></div>`;
+    });
+    html+='</div>';
+  }
+  html+=`<button class="btn ghost big" data-act="m-kind-add">${I('plus')}Своя мерка</button>
+    <p class="muted" style="margin:10px 2px">Обхваты удобнее мерить утром, в одном и том же месте, не напрягая мышцы.</p>`;
   return html;
 }
 function mChart(vals, unit){
@@ -2128,7 +2194,7 @@ function openMeasureAll(){
   openModal(`<div class="sheet-head"><h2>Записать замеры</h2>${closeX()}</div>
     <label for="maTs">Дата</label><input id="maTs" type="date" value="${dayKey(Date.now())}">
     <p class="muted" style="margin:8px 2px 0">Заполните только то, что мерили. В скобках — прошлое значение.</p>
-    <div class="grid2">${allKinds().map(kd=>{ const v=mValues(kd.k), last=v[v.length-1];
+    <div class="grid2">${visibleKinds().map(kd=>{ const v=mValues(kd.k), last=v[v.length-1];
       return `<div><label for="ma_${esc(kd.k)}">${esc(kd.name)}, ${esc(kd.unit)}</label>
         <input id="ma_${esc(kd.k)}" class="ma-inp" data-k="${esc(kd.k)}" inputmode="decimal" placeholder="${last?'('+esc(inVal(last.v))+')':'—'}"></div>`; }).join('')}</div>
     <button class="btn ok big" style="margin-top:16px" data-act="m-save-all">${I('save')}Сохранить</button>`);
