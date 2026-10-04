@@ -706,3 +706,25 @@ button.prev-lbl .i.sm{margin:0;color:var(--muted)}
 .w-step{text-transform:none;letter-spacing:0;font-weight:600;color:#9ec4ff}
 /* новый пункт программы — все поля сразу, без «Ещё» */
 .pi.full .pi-extra{border-top:none;padding-top:0;margin-top:0}
+/* отдых: −30 / +30 / Отмена в одну строку */
+.rest-btns .btn.sm{padding:8px 10px}
+
+/* блок «Программа» под упражнением: зелёная точка над текущим подходом и заметка пункта */
+.hint-sets{row-gap:9px}
+.hs{position:relative}
+.hs.next::before{content:'';position:absolute;top:-6px;left:50%;width:6px;height:6px;margin-left:-3px;border-radius:50%;
+  background:var(--ok);box-shadow:0 0 0 2px rgba(55,194,110,.25)}
+.hint-sets:has(.hs.next){margin-top:10px}
+.hint-note-line{display:block;width:100%;background:none;border:none;padding:2px 0 0;margin:0;cursor:pointer;text-align:left;
+  font-family:inherit;font-size:13px;font-style:italic;color:var(--warn);line-height:1.35;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hint-note-line.open{white-space:normal;overflow:visible}
+.hint-note-line:active{opacity:.6}
+
+/* «К записи» в верхней панели — когда «Сохранить» ушла за экран */
+.top-save{flex:none;display:flex;align-items:center;gap:4px;cursor:pointer;
+  background:rgba(55,194,110,.14);border:1px solid rgba(55,194,110,.45);color:#5fd68f;
+  border-radius:16px;padding:5px 8px 5px 9px;font-size:14px;font-weight:700;font-family:inherit;white-space:nowrap}
+.top-save:active{opacity:.6}
+.top-save .i{width:15px;height:15px;color:#5fd68f}
+.top-save .i.sm{width:13px;height:13px;margin:0;opacity:1}

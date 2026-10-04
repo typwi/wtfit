@@ -184,7 +184,13 @@ function normalize(d){
   const pl=out.active.plan;
   let pday=null;
   if(out.active.wId && pl) out.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(x=>{ if(x.id===+pl.dayId) pday=x; })));
-  out.active.plan = pday ? {dayId:pday.id, fx:normFix(pl, pday)} : null;
+  if(pday) out.active.plan={dayId:pday.id, fx:normFix(pl, pday)};
+  else if(out.active.wId && pl && pl.tmp && Array.isArray(pl.tmp.items)){
+    // «Повторить тренировку»: план без программы, пункты хранятся прямо в нём
+    const tmp={name:cleanName(pl.tmp.name)||'Тренировка', date:+pl.tmp.date||0, items:normItems(pl.tmp.items)};
+    out.active.plan={dayId:0, tmp, fx:normFix(pl, tmp)};
+  }
+  else out.active.plan=null;
   out.workouts.forEach(w=>{
     if(w.id===out.active.wId){ w.end=null; w.timed=true; }
     else if(w.timed && !w.end) w.timed=false;
@@ -192,18 +198,21 @@ function normalize(d){
   return out;
 }
 
+function normItems(arr){
+  return (Array.isArray(arr)?arr:[]).filter(it=>it && it.exId!=null).map(it=>({exId:+it.exId,
+    reps:num(it.reps), sets:num(it.sets), weight:num(it.weight), time:num(it.time), notes:it.notes?String(it.notes):'',
+    warm:!!it.warm, rest:(it.rest===0||it.rest==='0') ? 0 : num(it.rest),
+    pct:(num(it.pct)>0 && num(it.pct)<=200) ? num(it.pct) : null,
+    // источник 1ПМ для «%»: c — текущий, m — ручной (старые «авто»/«лучший» → текущий)
+    src: (it.src==null || it.src==='' || it.src==='m') ? 'm' : 'c',
+    test: !!it.test}));
+}
 function normPrograms(arr){
   const A=x=>Array.isArray(x)?x:[];
   return A(arr).filter(p=>p && cleanName(p.name)).map(p=>({id:+p.id, name:cleanName(p.name),
     folders:A(p.folders).filter(f=>f && cleanName(f.name)).map(f=>({id:+f.id, name:cleanName(f.name),
       days:A(f.days).filter(x=>x && cleanName(x.name)).map(x=>({id:+x.id, name:cleanName(x.name),
-        items:A(x.items).filter(it=>it && it.exId!=null).map(it=>({exId:+it.exId,
-          reps:num(it.reps), sets:num(it.sets), weight:num(it.weight), time:num(it.time), notes:it.notes?String(it.notes):'',
-          warm:!!it.warm, rest:(it.rest===0||it.rest==='0') ? 0 : num(it.rest),
-          pct:(num(it.pct)>0 && num(it.pct)<=200) ? num(it.pct) : null,
-          // источник 1ПМ для «%»: c — текущий, m — ручной (старые «авто»/«лучший» → текущий)
-          src: (it.src==null || it.src==='' || it.src==='m') ? 'm' : 'c',
-          test: !!it.test}))}))}))}));
+        items:normItems(x.items)}))}))}));
 }
 
 /* Переход на «текущий + ручной» 1ПМ. Раньше тест и предложение «обновить 1ПМ по рекордам» записывали
@@ -733,6 +742,7 @@ function showView(v){
   curView=v;
   $('#scroller').scrollTop=0;
   if(typeof updateTopRest==='function') updateTopRest();
+  if(typeof updateTopSave==='function') updateTopSave();
 }
 function go(tab){ showView(tab); refresh(); }
 function refresh(){
@@ -755,6 +765,7 @@ function renderRecord(){
   renderPlan();
   renderLastHint();
   renderToday();
+  updateTopSave();
 }
 
 function renderSuggest(){
@@ -828,8 +839,10 @@ function hintCtx(ex){
       if(nextChip<0) nextChip=chips.findIndex(c=>!c.done);
       const work=idx.filter(k=>!x.d.items[k].warm);
       const need=work.reduce((a,k)=>a+st[k].need,0), wdone=work.reduce((a,k)=>a+st[k].done,0);
-      plan={day:x.d.name, chips, next:nextChip, need, done:wdone,
-        it: nextChip>=0 ? chips[nextChip].it : planItem(x, idx[idx.length-1])};
+      const curK = nextChip>=0 ? chips[nextChip].k : idx[idx.length-1];
+      plan={day:x.d.name, tmp:!!x.tmp, chips, next:nextChip, need, done:wdone,
+        it: nextChip>=0 ? chips[nextChip].it : planItem(x, idx[idx.length-1]),
+        note: cleanName(x.d.items[curK].notes)};
     }
   }
   return {cur, prev, today, done, prevSets, prevWarm, warmDone, plan};
@@ -1001,7 +1014,7 @@ function renderLastHint(){
   renderWStep();
   const box=$('#lastHint');
   const ex=exByName(exInput.value);
-  if(!ex){ box.innerHTML=''; return; }
+  if(!ex){ box.innerHTML=''; updateTopSave(); return; }
   const c=hintCtx(ex);
   if(!c.prev && !c.today && !c.plan){
     box.innerHTML = prevOpen ? `<div class="hint-card"><div class="muted">Прошлый раз · записей по «${esc(ex.name)}» ещё нет</div></div>` : '';
@@ -1019,14 +1032,16 @@ function renderLastHint(){
       }${c.prevSets.map((r,i)=>chip(r,i,(c.cur&&i<c.done?' done':'')+(n.warm===false&&i===n.i?' next':''),'prev')).join('')}</div>`;
   }
   if(c.plan){
-    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}Программа · <b>${c.plan.done} из ${c.plan.need}</b></div>${sw('plan')}</div>
-      <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>`;
+    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}${c.plan.tmp?'Повтор':'Программа'} · <b>${c.plan.done} из ${c.plan.need}</b></div>${sw('plan')}</div>
+      <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>
+      ${c.plan.note?`<button type="button" class="hint-note-line" data-act="hint-note" title="Показать заметку целиком">«${esc(c.plan.note)}»</button>`:''}`;
   }
   if(!c.prev && c.today && prevOpen){
     html+=`<div class="hint-lbl">Раньше не делали · сегодня <b>${c.done} ${plural(c.done,'рабочий подход','рабочих подхода','рабочих подходов')}</b>${c.warmDone?` + ${c.warmDone} разм.`:''}</div>`;
   }
   box.innerHTML=(html ? `<div class="hint-card hint-col">${html}</div>` : '')
     + (c.prev && !prevOpen ? `<button type="button" class="prev-toggle" data-act="prev-toggle" aria-expanded="false">Прошлый раз${I('down','sm')}</button>` : '');
+  updateTopSave();
 }
 
 function recRow(r, fromW, gaps){
@@ -1504,6 +1519,34 @@ function initTopRest(){
     if(last && last.classList.contains('icon-btn')) tb.insertBefore(pill, last); else tb.appendChild(pill);
   });
 }
+/* «К записи» в верхней панели: кнопка «Сохранить» ушла за экран (а упражнение выбрано) — плашка
+   возвращает к карточке записи так, чтобы «Сохранить» снова была видна. Стрелка — куда листать. */
+function initTopSave(){
+  const tb=$('#view-record .topbar'); if(!tb) return;
+  const pill=document.createElement('button');
+  pill.type='button'; pill.className='top-save hidden'; pill.dataset.act='save-jump';
+  pill.setAttribute('aria-label','К карточке записи');
+  pill.innerHTML=I('pen')+'<span>К записи</span>'+I('down','sm top-save-dir');
+  tb.insertBefore(pill, tb.querySelector('.top-rest') || tb.lastElementChild);
+}
+function saveBtnPos(){
+  const b=$('#view-record [data-act="save"]'), sc=$('#scroller'), tb=$('#view-record .topbar');
+  if(!b || !sc || !tb) return 0;
+  const r=b.getBoundingClientRect(), top=tb.getBoundingClientRect().bottom, bottom=sc.getBoundingClientRect().bottom, h=r.height*0.6;
+  return r.top>bottom-h ? 1 : r.bottom<top+h ? -1 : 0;      // 1 — ниже экрана, −1 — выше, 0 — видна
+}
+let topSaveRaf=0;
+function updateTopSave(){
+  const p=$('.top-save'); if(!p) return;
+  const pos = curView==='record' && cleanName(exInput.value) ? saveBtnPos() : 0;
+  p.classList.toggle('hidden', !pos);
+  if(pos){ const u=p.querySelector('.top-save-dir use'); if(u) u.setAttribute('href', pos>0?'#i-down':'#i-up'); }
+}
+function jumpToSave(){
+  const b=$('#view-record [data-act="save"]'), sc=$('#scroller'); if(!b || !sc) return;
+  const r=b.getBoundingClientRect(), s2=sc.getBoundingClientRect();
+  sc.scrollBy({top: r.bottom-(s2.top+s2.height*0.85), behavior:'smooth'});
+}
 function restBlockVisible(){
   if(curView!=='record') return false;
   const rb=$('#restBlock'), tb=$('#view-record .topbar');
@@ -1553,8 +1596,10 @@ function cancelRest(){
 }
 function addRest(sec){
   if(!DB.active.restEnd) return;
+  // «−30 с»: осталось меньше — отдых заканчивается сейчас (засчитывается прошедшее время)
+  if(sec<0 && DB.active.restEnd+sec*1000<=Date.now()){ cancelRest(); toast('Отдых окончен', null, null, 1800, 'bell'); return; }
   DB.active.restEnd+=sec*1000;
-  DB.active.restTotal+=sec;
+  DB.active.restTotal=Math.max(1, DB.active.restTotal+sec);
   save(); tickRest();
 }
 function openCustomRest(){
@@ -2262,6 +2307,7 @@ async function deleteEx(){
   if(!await ask(`Удалить упражнение «${esc(ex.name)}»${n?` и ${plural(n,'его','все его','все его')} ${n} ${plural(n,'запись','записи','записей')}`:''}?${inProg?` Оно также уберётся из программ (${inProg} ${plural(inProg,'раз','раза','раз')}).`:''} Отменить будет нельзя.`,'Удалить',true)) return;
   DB.records=DB.records.filter(r=>r.exId!==ex.id);
   DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>{ d.items=d.items.filter(it=>it.exId!==ex.id); })));
+  if(DB.active.plan && DB.active.plan.tmp) DB.active.plan.tmp.items=DB.active.plan.tmp.items.filter(it=>it.exId!==ex.id);
   DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
   cleanupWorkouts(); save();
   closeModal();
@@ -2307,6 +2353,7 @@ function openWorkout(id){
   if(recs.length) html+=`<div class="grid2" style="margin-top:10px">
     <button class="btn ghost" data-act="sum-share" data-id="${w.id}">${I('upload')}Картинка</button>
     <button class="btn ghost" data-act="w-export" data-id="${w.id}">${I('download')}Таблица</button></div>`;
+  if(recs.length && !isActive(w)) html+=`<button class="btn ok big" data-act="w-repeat" data-id="${w.id}">${I('repeat')}Повторить тренировку</button>`;
   if(recs.length) html+=`<button class="btn ghost big" data-act="w-toprog" data-id="${w.id}">${I('clip')}Добавить в программу</button>`;
   const fin=!isActive(w);
   html+=`<div class="grid2" style="margin-top:10px">
@@ -2750,6 +2797,7 @@ async function migrateWeight(){
   recs.forEach(r=>addMeasure('weight', r.weight, r.ts));
   DB.records=DB.records.filter(r=>r.exId!==ex.id);
   DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>{ d.items=d.items.filter(it=>it.exId!==ex.id); })));
+  if(DB.active.plan && DB.active.plan.tmp) DB.active.plan.tmp.items=DB.active.plan.tmp.items.filter(it=>it.exId!==ex.id);
   DB.exercises=DB.exercises.filter(e=>e.id!==ex.id);
   cleanupWorkouts(); save(); renderWorkoutBar(); renderStats();
   toast('Вес тела перенесён в замеры', null, null, null, 'check');
@@ -2828,7 +2876,10 @@ function allDays(){ const out=[]; DB.programs.forEach(p=>p.folders.forEach(f=>f.
 function findDay(id){ return allDays().find(x=>x.d.id===id) || null; }
 function progById(id){ return DB.programs.find(p=>p.id===id); }
 function findFolder(id){ for(const p of DB.programs) for(const f of p.folders) if(f.id===id) return {p,f}; return null; }
-function forEachItem(fn){ DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>d.items.forEach(fn)))); }
+function forEachItem(fn){
+  DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>d.items.forEach(fn))));
+  if(DB.active.plan && DB.active.plan.tmp) DB.active.plan.tmp.items.forEach(fn);
+}
 function progStats(p){
   let days=0, items=0;
   p.folders.forEach(f=>{ days+=f.days.length; f.days.forEach(d=>{ items+=d.items.length; }); });
@@ -2836,12 +2887,14 @@ function progStats(p){
 }
 function hasPlanDays(){ return DB.programs.some(p=>p.folders.some(f=>f.days.length)); }
 function validatePlan(){
-  if(DB.active.plan && (!DB.active.wId || !findDay(DB.active.plan.dayId))) DB.active.plan=null;
+  const pl=DB.active.plan;
+  if(pl && (!DB.active.wId || !(pl.tmp || findDay(pl.dayId)))) DB.active.plan=null;
 }
 // упражнения, на которые ссылаются программы, должны существовать
 function fixProgramRefs(){
   const ids=new Set(DB.exercises.map(e=>e.id));
   DB.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>{ d.items=d.items.filter(it=>ids.has(it.exId)); })));
+  if(DB.active.plan && DB.active.plan.tmp) DB.active.plan.tmp.items=DB.active.plan.tmp.items.filter(it=>ids.has(it.exId));
   validatePlan();
 }
 // «Неделя 1» → «Неделя 2», «Верх» → «Верх 2»; результат не совпадает ни с одним именем из list
@@ -3303,6 +3356,7 @@ function saveDay(){
 function planCtx(){
   const pl=DB.active.plan;
   if(!pl || !DB.active.wId) return null;
+  if(pl.tmp) return {p:{name:'Повтор'}, f:{name:pl.tmp.date?fmtDate(pl.tmp.date):''}, d:{id:0, name:pl.tmp.name, items:pl.tmp.items}, tmp:true};
   return findDay(pl.dayId);
 }
 /* Выполнение плана по подходам. Каждый записанный подход (по времени) засчитывается в пункт того же
@@ -3370,7 +3424,6 @@ function togglePlan(){
 function renderPlan(){
   const box=$('#planBox'); if(!box) return;
   const x=planCtx();
-  renderPlanNext();
   if(!x){
     box.innerHTML = hasPlanDays() ? `<button class="btn ghost plan-open" data-act="plan-pick">${I('clip')}Тренировка по программе</button>` : '';
     return;
@@ -3393,7 +3446,7 @@ function renderPlan(){
           <div class="rec-desc">${planDesc(planItem(x,i))}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
       </div>`; }).join('')}
     ${planFolded && next>=0 ? (()=>{ const it=planItem(x,next), e=exById(it.exId), s2=st[next];
-      return `<div class="plan-next-row" data-act="plan-next" data-i="${next}">
+      return `<div class="plan-next-row" data-act="plan-next" data-i="${next}" data-ex="${esc(normKey(e?e.name:''))}">
         <div class="rec-main"><div class="plan-next-lbl">Далее${s2.need>1?` · подход ${s2.done+1} из ${s2.need}`:''}</div>
           <div class="rec-name">${it.warm?WARM_TAG:''}${esc(e?e.name:'?')}</div>
           <div class="rec-desc">${planDesc(it)}</div>
@@ -3401,6 +3454,7 @@ function renderPlan(){
         <span class="plan-next-btn">Подставить</span></div>`; })() : ''}
     ${st.length && next<0 ? `<div class="plan-done">${I('flag')}Все упражнения выполнены</div>` : ''}
   </div>`;
+  renderPlanNext();
 }
 function openPlanPicker(){
   let html=`<div class="sheet-head"><h2>Тренировка по программе</h2>${closeX()}</div>`;
@@ -3435,16 +3489,48 @@ function startPlan(dayId){
   try{ localStorage.setItem(AUTOFILL_KEY, 'plan'); localStorage.setItem(AUTOREST_KEY, 'plan'); }catch(e){}
   renderRestPresets();
   save(); closeModal(); go('record');
+  fillFirstPlanItem();
   toast(again ? `Тренировка «${x.d.name}» продолжается` : `Тренировка «${x.d.name}» началась`, null, null, null, 'play');
   checkOrmNeeded(x.d.items, true);
+}
+/* «Повторить тренировку»: прошедшая тренировка запускается как план — без создания программы.
+   Пункты — её подходы (одинаковые подряд склеены), веса те же. Подпись и «день программы» берутся
+   от исходной, поэтому итог сравнит с ней же. */
+async function startRepeat(wId){
+  const src=wById(wId); if(!src) return;
+  const items=workoutItems(wId);
+  if(!items.length){ toast('В тренировке нет записей'); return; }
+  if(planCtx() && !await ask('Сейчас идёт тренировка по программе. Заменить её повтором этой тренировки?','Заменить')) return;
+  if(!DB.active.wId) startWorkout(true);
+  const name=src.plan || `Тренировка #${workoutNumber(wId)}`;
+  DB.active.plan={dayId:0, fx:[], tmp:{name, date:src.start, items}};
+  syncPlanFix(planCtx());
+  const w=activeW();
+  if(w){ w.plan=src.plan || `Повтор ${fmtDM(src.start)}`; w.planDay=src.planDay||null; }
+  autoSrc='plan'; arMode='plan';
+  try{ localStorage.setItem(AUTOFILL_KEY, 'plan'); localStorage.setItem(AUTOREST_KEY, 'plan'); }catch(e){}
+  renderRestPresets();
+  save(); closeModal(); go('record');
+  fillFirstPlanItem();
+  toast(`Повтор: «${name}» · ${items.length} ${plural(items.length,'пункт','пункта','пунктов')}`, null, null, null, 'play');
+}
+// старт плана: пустую форму сразу заполнить следующим пунктом
+function fillFirstPlanItem(){
+  const x=planCtx(); if(!x || cleanName(exInput.value) || !formEmpty()) return;
+  const i=planNextIdx(x, planStatus(x));
+  if(i>=0) fillFromPlan(i, true);
 }
 function closePlan(){
   DB.active.plan=null; save(); renderPlan();
   toast('Программа скрыта — тренировка продолжается');
 }
 // подсказка над полем «Упражнение»: первое невыполненное упражнение программы — подставить одним нажатием
+/* Строка «Далее» дублирует блок «Программа» под полем упражнения, когда это упражнение уже выбрано, —
+   тогда она прячется, карточка программы становится короче. Видна, когда следующее — другое упражнение. */
 function renderPlanNext(){
   const box=$('#planNext'); if(box) box.innerHTML='';
+  const row=$('#planBox .plan-next-row');
+  if(row) row.classList.toggle('hidden', !!row.dataset.ex && row.dataset.ex===normKey(exInput.value));
 }
 function fillFromPlan(i, noScroll){
   const x=planCtx(); if(!x) return;
@@ -4354,7 +4440,9 @@ document.addEventListener('click', e=>{
     case 'rest-custom-start':customRestStart(); break;
     case 'rest-cancel':      cancelRest(); toast('Отдых остановлен'); break;
     case 'rest-add':         addRest(30); break;
+    case 'rest-sub':         addRest(-30); break;
     case 'rest-jump':        jumpToRest(); break;
+    case 'save-jump':        jumpToSave(); break;
     case 'notes-toggle':     toggleNotes(); break;
     case 'w-addrec':         openRecAdd(id); break;
     case 'w-addrec-save':    saveRecAdd(id); break;
@@ -4401,6 +4489,7 @@ document.addEventListener('click', e=>{
     case 'pi-more':          togglePiMore(+el.dataset.i); break;
     case 'di-copy':          dayItemCopy(+el.dataset.i); break;
     case 'fill-chip':        fillChip(el.dataset.src, +el.dataset.i); break;
+    case 'hint-note':        el.classList.toggle('open'); break;
     case 'fill-plan-ex':     fillFromPlanEx(); break;
     case 'w-summary':        openSummary(id); break;
     case 'stats-mode':       statsMode=el.dataset.mode; renderStats(); break;
@@ -4463,6 +4552,7 @@ document.addEventListener('click', e=>{
     case 'plan-fill':        fillFromPlan(+el.dataset.i); break;
     case 'plan-next':        fillFromPlan(+el.dataset.i, true); break;
     case 'w-toprog':         openAddToProg(id); break;
+    case 'w-repeat':         startRepeat(id); break;
     case 'ap-save':          saveAddToProg(); break;
   }
 });
@@ -4558,12 +4648,17 @@ if('serviceWorker' in navigator && location.protocol==='https:'){
 
 /* ================== СТАРТ ================== */
 initTopRest();
+initTopSave();
 if(swStart){ swTimer=setInterval(swRender, 500); }
 swRender();
 renderRestPresets();
 syncWake();
 $$('.note-toggle').forEach(b=>b.classList.toggle('active', notesOn));
-$('#scroller').addEventListener('scroll', ()=>{ if(DB.active.restEnd) updateTopRest(); }, {passive:true});
+$('#scroller').addEventListener('scroll', ()=>{
+  if(DB.active.restEnd) updateTopRest();
+  if(!topSaveRaf) topSaveRaf=requestAnimationFrame(()=>{ topSaveRaf=0; updateTopSave(); });
+}, {passive:true});
+window.addEventListener('resize', ()=>updateTopSave());
 askPersist();
 fixOrphans();
 fixProgramRefs();
@@ -4576,4 +4671,5 @@ if(DB.active.restEnd){
 }
 showView('record');
 renderRecord();
+fillFirstPlanItem();          // приложение открыли посреди тренировки по плану — форма сразу со следующим подходом
 checkForgotten();
