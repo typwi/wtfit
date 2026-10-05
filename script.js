@@ -2055,7 +2055,7 @@ document.addEventListener('click', e=>{
   const it=e.target.closest('.exs-suggest .suggest-item'); if(!it) return;
   const inp=it.closest('.autocomplete').querySelector('input[data-exs]');
   const n=exsList[+it.dataset.exsI];
-  if(inp && n!=null){ inp.value=n; hideExsSuggest(); inp.blur(); markBad(inp,false); }
+  if(inp && n!=null){ inp.value=n; inp.dispatchEvent(new Event('input', {bubbles:true})); hideExsSuggest(); inp.blur(); markBad(inp,false); }
 });
 
 /* ================== ПОДСКАЗКИ ЗАМЕТОК ==================
@@ -3168,10 +3168,10 @@ function renderProgram(){
       <button class="icon-btn sm" data-act="folder-menu" data-id="${f.id}" aria-label="Действия с папкой">${I('more')}</button></div>
       <div class="card list-card">`;
     f.days.forEach(d=>{
-      const names=d.items.map(it=>{ const e=exById(it.exId); return e?e.name:'?'; });
+      const names=[...new Set(d.items.map(it=>{ const e=exById(it.exId); return e?e.name:'?'; }))];   // каждое упражнение — один раз
       html+=`<div class="rec-row" data-act="day-open" data-id="${d.id}">
         <div class="rec-main"><div class="rec-name">${esc(d.name)}${d.id===liveId?' <span class="badge">идёт</span>':''}</div>
-          <div class="rec-desc day-names">${d.items.length} упр.${names.length?' · '+esc(names.join(', ')):''}</div></div>
+          <div class="rec-desc day-names">${names.length} упр.${names.length?' · '+esc(names.join(', ')):''}</div></div>
         <div class="chev">${I('chev')}</div></div>`;
     });
     html+=`<div class="rec-row add-row" data-act="day-add" data-id="${f.id}">${I('plus')}Добавить тренировку</div></div>`;
@@ -3274,6 +3274,25 @@ async function deleteFolder(fid){
   toast('Папка удалена');
 }
 
+/* ---- группы: подряд идущие пункты одного упражнения показываются под одним заголовком ----
+   Только отображение: в данных пункты остаются отдельными. Номера подходов — сквозные по дню. */
+function runsBy(arr, key){
+  const g=[];
+  arr.forEach((it,i)=>{ const k=key(it), last=g[g.length-1];
+    if(last && k!=null && k===last.k) last.idx.push(i); else g.push({k, idx:[i]}); });
+  return g;
+}
+const dayRuns = items => runsBy(items, it=>it.exId||null);
+// «4 рабочих подхода · разминка 3»
+function grpSum(list){
+  let w=0, r=0;
+  list.forEach(it=>{ const n=Math.max(1, Math.round(num(it.sets)||1)); if(it.warm) r+=n; else w+=n; });
+  return [w?`${w} ${plural(w,'рабочий подход','рабочих подхода','рабочих подходов')}`:'', r?`разминка ${r}`:''].filter(Boolean).join(' · ');
+}
+const grpHead = (n, name, cls='', extra='') => `<div class="pg-head${cls}"${extra}><span class="pg-num">${n}.</span><span class="pg-name">${esc(name)}</span></div>`;
+// строка подхода внутри группы: разминка · вес × повторы × подходы «заметка»
+const grpDesc = (it, shown) => `<div class="rec-main"><div class="rec-desc pg-desc">${it.warm?WARM_TAG:''}${planDesc(shown||it)}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>`;
+
 /* ---- тренировка программы ---- */
 function openDay(id){
   const x=findDay(id);
@@ -3281,13 +3300,10 @@ function openDay(id){
   const {p,f,d}=x;
   const live=DB.active.plan && DB.active.plan.dayId===id;
   const list = d.items.length
-    ? `<div class="card list-card sheet-list">${d.items.map((it,i)=>{
-        const e=exById(it.exId);
-        return `<div class="rec-row" data-act="day-edit" data-id="${d.id}">
-          <span class="plan-mark">${i+1}</span>
-          <div class="rec-main"><div class="rec-name">${it.warm?WARM_TAG:''}${esc(e?e.name:'?')}</div>
-            <div class="rec-desc">${planDesc(it)}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
-        </div>`;
+    ? `<div class="card list-card sheet-list">${dayRuns(d.items).map((g,gi)=>{
+        const e=exById(d.items[g.idx[0]].exId);
+        return `<div class="pg" data-act="day-edit" data-id="${d.id}">${grpHead(gi+1, e?e.name:'?')}
+          ${g.idx.map(i=>`<div class="rec-row pg-row"><span class="plan-mark">${i+1}</span>${grpDesc(d.items[i])}</div>`).join('')}</div>`;
       }).join('')}</div>`
     : '<div class="empty" style="padding:20px 10px">Упражнений пока нет — нажмите «Изменить»</div>';
   openModal(`<div class="sheet-head"><h2>${esc(d.name)}</h2>${closeX()}</div>
@@ -3348,7 +3364,14 @@ function piRead(el, old){
   return {name:g('.pi-name'), reps:g('.pi-reps'), sets:g('.pi-sets'), weight:g('.pi-weight'),
     pct:el.querySelector('.pi-unit').classList.contains('pct'), src:(old&&old.src)==='m'?'m':'c',
     time:g('.pi-time'), notes:g('.pi-notes'), rest:g('.pi-restv'), warm:ch('.pi-warmv'), test:ch('.pi-testv'),
-    open:el.classList.contains('open'), full:el.classList.contains('full')};
+    open:el.classList.contains('open'), full:el.classList.contains('full'), gc:!!(old&&old.gc)};
+}
+// свернуть / развернуть группу подходов одного упражнения (флаг хранится у первого пункта группы)
+function togglePig(i){
+  readDayDraft();
+  const it=dayDraft && dayDraft.items[i]; if(!it) return;
+  it.gc=!it.gc;
+  renderDayEdit();
 }
 function togglePiMore(i){
   const el=$$('#dItems .pi')[i]; if(!el) return;
@@ -3363,6 +3386,17 @@ document.addEventListener('input', e=>{
   if(!dayDraft || !e.target.matches || !e.target.matches('#dItems .pi-weight, #dItems .pi-name')) return;
   const el=e.target.closest('.pi'), it=dayDraft.items[+el.dataset.i], c=el.querySelector('.pi-calc');
   if(c) c.textContent=piCalc(el.querySelector('.pi-name').value, el.querySelector('.pi-weight').value, it && it.src);
+  // название в первой карточке группы — то же упражнение у всей группы и в заголовке
+  const pg=el.closest('.pig');
+  if(pg && e.target.matches('.pi-name') && !el.classList.contains('cont')){
+    const v=e.target.value, h=pg.querySelector('.pig-head .pg-name');
+    if(h){ h.textContent=cleanName(v)||'Новое упражнение'; h.classList.toggle('empty', !cleanName(v)); }
+    pg.querySelectorAll('.pi.cont').forEach(c2=>{
+      c2.querySelector('.pi-name').value=v;
+      const k=c2.querySelector('.pi-calc'), it2=dayDraft.items[+c2.dataset.i];
+      if(k) k.textContent=piCalc(v, c2.querySelector('.pi-weight').value, it2 && it2.src);
+    });
+  }
 });
 function toggleItemUnit(i){
   readDayDraft();
@@ -3396,7 +3430,7 @@ function toggleItemSrc(i, src){
 function dayItemCopy(i){
   readDayDraft();
   const it=dayDraft.items[i]; if(!it) return;
-  dayDraft.items.splice(i+1, 0, Object.assign({}, it));
+  dayDraft.items.splice(i+1, 0, Object.assign({}, it, {gc:false}));
   renderDayEdit();
   toast('Пункт скопирован', null, null, 1500, 'copy');
 }
@@ -3428,12 +3462,13 @@ function togglePiAll(){
   try{ localStorage.setItem(PIALL_KEY, piAll?'1':'0'); }catch(e){}
   renderDayEdit();
 }
-function piHtml(it, i, n){
+// cont — продолжение группы: упражнение то же, что в заголовке, поле названия скрыто (но остаётся в форме)
+function piHtml(it, i, n, cont){
   const full=it.full || piAll;
   const srcSeg = it.pct ? (()=>{ const ex=exByName(cleanName(it.name)), c=ex?curOrm(ex.id):0, m=ex?manualOrm(ex.id):0;
     const b=(src,lbl,v)=>`<button type="button" class="${it.src===src?'active':''}" data-act="pi-src" data-i="${i}" data-src="${src}">${lbl} ${v?fmtNum(round(v,1)):'—'}</button>`;
     return `<div class="pi-src"><span>% от 1ПМ:</span>${b('c','текущий',c)}${b('m','ручной',m)}</div>`; })() : '';
-  return `<div class="pi${it.full?' open full':piAll?' open allx':it.open?' open':''}" data-i="${i}">
+  return `<div class="pi${it.full?' open full':piAll?' open allx':it.open?' open':''}${cont?' cont':''}" data-i="${i}">
       <div class="pi-head"><span class="pi-num">${i+1}</span>
         <div class="autocomplete pi-ac"><input class="pi-name" data-exs="1" value="${esc(it.name)}" placeholder="Упражнение" autocomplete="off" autocorrect="off" autocapitalize="sentences"><div class="suggest exs-suggest"></div></div>
         <button type="button" class="pi-btn" data-act="di-move" data-i="${i}" data-d="-1"${i===0?' disabled':''} aria-label="Выше">${I('up')}</button>
@@ -3470,7 +3505,14 @@ function renderDayEdit(focusIdx){
   if(!p){ closeModal(); return; }
   const fOpts=p.folders.map(f=>`<option value="${f.id}"${f.id===D.folderId?' selected':''}>${esc(f.name)}</option>`).join('');
   const n=D.items.length;
-  const items=D.items.map((it,i)=>piHtml(it, i, n)).join('');
+  const items=runsBy(D.items, it=>normKey(cleanName(it.name))||null).map((g,gi)=>{
+    const h=D.items[g.idx[0]], nm=cleanName(h.name);
+    return `<div class="pig${h.gc?' gc':''}">
+      <div class="pig-head" data-act="pi-group" data-i="${g.idx[0]}"><span class="pg-num">${gi+1}.</span>
+        <span class="pg-name${nm?'':' empty'}">${esc(nm||'Новое упражнение')}</span>
+        <span class="pig-sum">${esc(grpSum(g.idx.map(i=>D.items[i])))}</span>${I('down')}</div>
+      ${g.idx.map((i,j)=>piHtml(D.items[i], i, n, j>0)).join('')}</div>`;
+  }).join('');
   const sh=$('#modalSheet'), keep=$('#modal').classList.contains('show') && $('#dItems') ? sh.scrollTop : 0;
   openModal(`<div class="sheet-head"><h2>${D.id?'Изменить тренировку':'Новая тренировка'}</h2>
       <button class="icon-btn" data-act="day-edit-cancel" aria-label="Закрыть">${I('x')}</button></div>
@@ -3533,6 +3575,9 @@ function saveDay(){
     markBad(g('.pi-name'), !nm); if(!nm) rowBad=true;
     // ошибка в скрытом поле — раскрыть «Ещё», чтобы её было видно
     if(el.querySelector('.pi-extra .bad')){ el.classList.add('open'); const it0=D.items[+el.dataset.i]; if(it0) it0.open=true; }
+    // ошибка в свёрнутой группе — развернуть её
+    const pg=el.closest('.pig.gc');
+    if(pg && el.querySelector('.bad')){ pg.classList.remove('gc'); const h=D.items[+pg.querySelector('.pig-head').dataset.i]; if(h) h.gc=false; }
     if(rowBad){ bad=true; return; }
     const rv=String(g('.pi-restv').value||'').trim();
     const wv2=num(g('.pi-weight').value);
@@ -3652,13 +3697,13 @@ function renderPlan(){
       <button class="icon-btn sm" data-act="plan-close" aria-label="Убрать программу">${I('x')}</button>
     </div>
     <div class="progress plan-progress"><div style="width:${needAll?Math.round(doneAll/needAll*100):0}%"></div></div>
-    ${planFolded ? '' : x.d.items.map((it,i)=>{ const e=exById(it.exId);
-      const s=st[i], part=!s.ok && s.done>0;
-      return `<div class="plan-row${s.ok?' done':''}${i===next?' next':''}${it.warm?' warm':''}" data-act="plan-fill" data-i="${i}">
-        <span class="plan-mark${part?' part':''}">${s.ok?I('check'):part?`${s.done}/${s.need}`:(i+1)}</span>
-        <div class="rec-main"><div class="rec-name">${it.warm?WARM_TAG:''}${esc(e?e.name:'?')}</div>
-          <div class="rec-desc">${planDesc(planItem(x,i))}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>
-      </div>`; }).join('')}
+    ${planFolded ? '' : dayRuns(x.d.items).map((g,gi)=>{ const e=exById(x.d.items[g.idx[0]].exId);
+      const allOk=g.idx.every(i=>st[i].ok);
+      return `<div class="pg pg-plan">${grpHead(gi+1, e?e.name:'?', allOk?' done':'')}
+        ${g.idx.map(i=>{ const it=x.d.items[i], s=st[i], part=!s.ok && s.done>0;
+        return `<div class="plan-row pg-row${s.ok?' done':''}${i===next?' next':''}${it.warm?' warm':''}" data-act="plan-fill" data-i="${i}">
+          <span class="plan-mark${part?' part':''}">${s.ok?I('check'):part?`${s.done}/${s.need}`:(i+1)}</span>
+          ${grpDesc(it, planItem(x,i))}</div>`; }).join('')}</div>`; }).join('')}
     ${planFolded && next>=0 ? (()=>{ const it=planItem(x,next), e=exById(it.exId), s2=st[next];
       return `<div class="plan-next-row" data-act="plan-next" data-i="${next}" data-ex="${esc(normKey(e?e.name:''))}">
         <div class="rec-main"><div class="plan-next-lbl">Далее${s2.need>1?` · подход ${s2.done+1} из ${s2.need}`:''}</div>
@@ -4737,6 +4782,7 @@ document.addEventListener('click', e=>{
     case 'pi-src':           toggleItemSrc(+el.dataset.i, el.dataset.src); break;
     case 'pi-more':          togglePiMore(+el.dataset.i); break;
     case 'pi-all':           togglePiAll(); break;
+    case 'pi-group':         togglePig(+el.dataset.i); break;
     case 'set-skip':         skipSet(+el.dataset.i); break;
     case 'di-copy':          dayItemCopy(+el.dataset.i); break;
     case 'fill-chip':        fillChip(el.dataset.src, +el.dataset.i); break;

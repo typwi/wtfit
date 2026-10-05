@@ -777,3 +777,34 @@ button.pct-btn:active{opacity:.6}
 .hs.skip{background:transparent;color:var(--muted);text-decoration:line-through;box-shadow:inset 0 0 0 1px var(--border)}
 button.hs.hs-skip{display:inline-flex;align-items:center;gap:2px;background:transparent;color:var(--muted);box-shadow:inset 0 0 0 1px dashed var(--border);border:1px dashed var(--border);font-weight:600}
 .hs-skip .i.sm{margin:0;width:12px;height:12px}
+
+/* ===== группы подходов одного упражнения ===== */
+.pg{border-top:1px solid var(--border)}
+.pg:first-child{border-top:none}
+.pg-head{display:flex;align-items:baseline;gap:6px;padding:10px 0 2px;font-weight:700;font-size:15px}
+.pg-num{flex:none;color:var(--muted);font-weight:700}
+.pg-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pg-name.empty{color:var(--muted);font-weight:600}
+.pg-head.done .pg-name{color:var(--muted);text-decoration:line-through}
+.pg-row{border-top:none!important;padding:5px 0 5px 14px!important}
+.pg-row .plan-mark{width:24px;height:24px;font-size:12px}
+.pg-desc{font-size:14px;color:var(--txt)}
+.pg-desc .warm-tag{margin-right:4px}
+.pg-row:last-child{padding-bottom:10px!important}
+.plan-row.pg-row.done .pg-desc{color:var(--muted);text-decoration:line-through}
+.sheet-list .pg{padding:0 12px;cursor:pointer}
+.sheet-list .pg:active{opacity:.6}
+.pg-plan .pg-head{padding-top:9px}
+
+/* редактор */
+.pig{margin-bottom:10px}
+.pig-head{display:flex;align-items:center;gap:6px;padding:8px 4px;cursor:pointer;font-weight:700;font-size:15px;-webkit-user-select:none;user-select:none}
+.pig-head:active{opacity:.6}
+.pig-head .i{flex:none;width:18px;height:18px;color:var(--muted);transform:rotate(180deg);transition:transform .15s}
+.pig-sum{display:none;flex:none;font-size:12px;font-weight:600;color:var(--muted)}
+.pig.gc .pig-sum{display:block}
+.pig.gc .pig-head .i{transform:none}
+.pig.gc .pi{display:none}
+.pig .pi{margin-left:10px}
+.pi.cont .pi-ac{display:none}
+.pi.cont .pi-head .pi-num{margin-right:auto}
