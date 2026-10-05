@@ -187,11 +187,12 @@ function normalize(d){
   const pl=out.active.plan;
   let pday=null;
   if(out.active.wId && pl) out.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(x=>{ if(x.id===+pl.dayId) pday=x; })));
-  if(pday) out.active.plan={dayId:pday.id, fx:normFix(pl, pday)};
+  const skipN=o=>{ const r={}; if(o && typeof o==='object') Object.keys(o).forEach(k=>{ const v=Math.round(+o[k]); if(v>0) r[+k]=v; }); return r; };
+  if(pday) out.active.plan={dayId:pday.id, fx:normFix(pl, pday), skip:skipN(pl.skip)};
   else if(out.active.wId && pl && pl.tmp && Array.isArray(pl.tmp.items)){
     // «Повторить тренировку»: план без программы, пункты хранятся прямо в нём
     const tmp={name:cleanName(pl.tmp.name)||'Тренировка', date:+pl.tmp.date||0, items:normItems(pl.tmp.items)};
-    out.active.plan={dayId:0, tmp, fx:normFix(pl, tmp)};
+    out.active.plan={dayId:0, tmp, fx:normFix(pl, tmp), skip:skipN(pl.skip)};
   }
   else out.active.plan=null;
   out.workouts.forEach(w=>{
@@ -870,7 +871,7 @@ function hintCtx(ex){
       const chips=[];
       idx.forEach(k=>{ const it=x.d.items[k], s=st[k];
         const ri=planItem(x,k);
-        for(let j=0;j<s.need;j++) chips.push({it:ri, k, done:j<s.done, warm:!!it.warm}); });
+        for(let j=0;j<s.need;j++) chips.push({it:ri, k, done:j<s.done, skip:j<s.skip, warm:!!it.warm}); });
       const nk=planNextIdx(x, st, ex.id);
       let nextChip=chips.findIndex(c=>!c.done && c.k===nk);
       if(nextChip<0) nextChip=chips.findIndex(c=>!c.done);
@@ -1094,7 +1095,7 @@ function renderLastHint(){
   }
   if(c.plan){
     html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}${c.plan.tmp?'Повтор':'Программа'} · <b>${c.plan.done} из ${c.plan.need}</b></div>${sw('plan')}</div>
-      <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}</div>
+      <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.skip?' skip':ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}${c.plan.next>=0 && !c.plan.chips[c.plan.next].done?`<button type="button" class="hs hs-skip" data-act="set-skip" data-i="${c.plan.next}">Пропустить ${I('chev','sm')}</button>`:''}</div>
       ${(c.plan.pct || c.plan.note || c.plan.rest!=null) ? `<div class="hint-meta">${c.plan.pct?`<button type="button" class="pct-lbl pct-btn" data-act="orm-quick" data-id="${ex.id}" title="Изменить 1ПМ">${fmtNum(c.plan.pct)}% ${c.plan.src==='m'?'ручн. 1ПМ':'1ПМ'}</button>`:''}${c.plan.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(c.plan.rest)}</span>`:''}${c.plan.note?`<button type="button" class="hint-note-line" data-act="hint-note" title="Показать заметку целиком">«${esc(c.plan.note)}»</button>`:''}</div>` : ''}`;
   }
   if(!c.prev && c.today && prevOpen){
@@ -3416,11 +3417,23 @@ function openDayEdit(id, folderId){
   delete modalBase.day;                 // новое открытие редактора — новое исходное состояние
   renderDayEdit(x ? null : 0);
 }
+/* «Показать всё» в редакторе программы: у всех пунктов поля видны сразу, кнопок «Ещё» нет — как при создании.
+   Запоминается. */
+const PIALL_KEY='fitness_pi_all';
+let piAll=false;
+try{ piAll=localStorage.getItem(PIALL_KEY)==='1'; }catch(e){}
+function togglePiAll(){
+  readDayDraft();
+  piAll=!piAll;
+  try{ localStorage.setItem(PIALL_KEY, piAll?'1':'0'); }catch(e){}
+  renderDayEdit();
+}
 function piHtml(it, i, n){
+  const full=it.full || piAll;
   const srcSeg = it.pct ? (()=>{ const ex=exByName(cleanName(it.name)), c=ex?curOrm(ex.id):0, m=ex?manualOrm(ex.id):0;
     const b=(src,lbl,v)=>`<button type="button" class="${it.src===src?'active':''}" data-act="pi-src" data-i="${i}" data-src="${src}">${lbl} ${v?fmtNum(round(v,1)):'—'}</button>`;
     return `<div class="pi-src"><span>% от 1ПМ:</span>${b('c','текущий',c)}${b('m','ручной',m)}</div>`; })() : '';
-  return `<div class="pi${it.full?' open full':it.open?' open':''}" data-i="${i}">
+  return `<div class="pi${it.full?' open full':piAll?' open allx':it.open?' open':''}" data-i="${i}">
       <div class="pi-head"><span class="pi-num">${i+1}</span>
         <div class="autocomplete pi-ac"><input class="pi-name" data-exs="1" value="${esc(it.name)}" placeholder="Упражнение" autocomplete="off" autocorrect="off" autocapitalize="sentences"><div class="suggest exs-suggest"></div></div>
         <button type="button" class="pi-btn" data-act="di-move" data-i="${i}" data-d="-1"${i===0?' disabled':''} aria-label="Выше">${I('up')}</button>
@@ -3433,14 +3446,14 @@ function piHtml(it, i, n){
         <label class="pi-l">Повторы<input class="pi-reps" inputmode="decimal" value="${esc(it.reps)}" placeholder="—" autocomplete="off"></label>
         <label class="pi-l">Подходы<input class="pi-sets" inputmode="decimal" value="${esc(it.sets)}" placeholder="—" autocomplete="off"></label>
       </div>
-      ${it.full?'':`<button type="button" class="pi-more" data-act="pi-more" data-i="${i}"><span class="pi-more-l">Ещё${I('down')}</span><span class="pi-more-sum">${esc(piSum(it))}</span></button>`}
+      ${full?'':`<button type="button" class="pi-more" data-act="pi-more" data-i="${i}"><span class="pi-more-l">Ещё${I('down')}</span><span class="pi-more-sum">${esc(piSum(it))}</span></button>`}
       <div class="pi-extra">
         ${srcSeg}
         <div class="pi-grid pi-grid2">
           <label class="pi-l">Время, мин<input class="pi-time" inputmode="decimal" value="${esc(it.time)}" placeholder="—" autocomplete="off"></label>
           <label class="pi-l">Отдых, мин<input class="pi-restv" inputmode="decimal" value="${esc(it.rest)}" placeholder="—" autocomplete="off"></label>
         </div>
-        ${(i===0 || !it.full) ? '<div class="pi-hint">Отдых 0 — без отдыха; пусто — как выбрано на экране «Запись».</div>' : ''}
+        ${(i===0 || !full) ? '<div class="pi-hint">Отдых 0 — без отдыха; пусто — как выбрано на экране «Запись».</div>' : ''}
         <div class="pi-checks">
           <label class="check"><input type="checkbox" class="pi-warmv"${it.warm?' checked':''}>Разминка</label>
           <label class="check"><input type="checkbox" class="pi-testv"${it.test?' checked':''}>Тест 1ПМ</label>
@@ -3464,7 +3477,8 @@ function renderDayEdit(focusIdx){
     <label for="dName">Название</label>
     <input id="dName" value="${esc(D.name)}" autocomplete="off" autocapitalize="sentences">
     ${p.folders.length>1?`<label for="dFolder">Папка</label><select id="dFolder">${fOpts}</select>`:''}
-    <label>Упражнения</label>
+    <div class="lbl-row pi-all-row"><label>Упражнения</label>
+      <button type="button" class="warm-btn sm${piAll?' active':''}" data-act="pi-all" aria-pressed="${piAll}"><span class="warm-sw"></span>Показать всё</button></div>
     <div id="dItems">${items}</div>
     <button class="btn ghost big" data-act="di-add">${I('plus')}Добавить упражнение</button>
     <div class="grid2" style="margin-top:14px">
@@ -3543,7 +3557,7 @@ function saveDay(){
   day.name=name; day.items=final;
   dayDraft=null;
   // правка дня, который идёт сейчас: у нетронутых пунктов веса остаются, новые и изменённые считаются заново
-  if(DB.active.plan && DB.active.plan.dayId===day.id){ const x=findDay(day.id); if(x) syncPlanFix(x); }
+  if(DB.active.plan && DB.active.plan.dayId===day.id){ const x=findDay(day.id); if(x) syncPlanFix(x); DB.active.plan.skip={}; }
   save(); refresh(); openDay(day.id);
   toast('Сохранено', null, null, null, 'check');
   checkOrmNeeded(day.items);
@@ -3565,7 +3579,10 @@ function planStatus(x){
   const items=x.d.items, w=activeW();
   const typeOf=it=>it.warm?'warm':it.test?'test':'work';
   const hasTest=new Set(items.filter(it=>it.test && !it.warm).map(it=>it.exId));
-  const need=items.map(it=>Math.max(1, Math.round(it.sets||1))), done=items.map(()=>0), byRec=new Map();
+  const need=items.map(it=>Math.max(1, Math.round(it.sets||1))), byRec=new Map();
+  // пропущенные подходы («Пропустить») засчитаны сразу — подходы идут в оставшиеся
+  const sk=(DB.active.plan && DB.active.plan.dayId===x.d.id && DB.active.plan.skip) || {};
+  const skip=items.map((it,k)=>Math.min(need[k], +sk[k]||0)), done=skip.slice();
   let pw=null;                       // плановые веса пунктов — считаем, только когда есть из чего выбирать
   (w ? recsOfW(w.id) : []).forEach(r=>{
     const t = r.warm ? 'warm' : (r.t1 && hasTest.has(r.exId)) ? 'test' : 'work';
@@ -3582,7 +3599,7 @@ function planStatus(x){
       done[k]++; byRec.set(r.id, k);
     }
   });
-  const st=items.map((it,k)=>({need:need[k], done:done[k], ok:done[k]>=need[k], warm:!!it.warm}));
+  const st=items.map((it,k)=>({need:need[k], done:done[k], ok:done[k]>=need[k], warm:!!it.warm, skip:skip[k]}));
   st.byRec=byRec;
   return st;
 }
@@ -3721,6 +3738,22 @@ function fillFirstPlanItem(){
 function testToCurrent(exId){
   if(!pctItemsOf(exId).some(it=>it.src==='m')) return false;
   return setOrmSrc(exId, 'c');
+}
+/* «Пропустить» — подход с зелёной точкой засчитывается без записи (не делал), точка уходит дальше.
+   В сообщении — «Отменить». */
+function skipSet(i){
+  const ex=exByName(exInput.value); if(!ex || !planCtx()) return;
+  const c=hintCtx(ex), ch=c.plan && c.plan.chips[i]; if(!ch || ch.done) return;
+  const pl=DB.active.plan, k=ch.k; pl.skip=pl.skip||{};
+  pl.skip[k]=(pl.skip[k]||0)+1;
+  chipSel=null; save();
+  clearForm(false); renderRecord(); autoFillNext(true);
+  toast('Подход пропущен', 'Отменить', ()=>{
+    const p2=DB.active.plan; if(!p2 || !p2.skip || !p2.skip[k]) return;
+    p2.skip[k]--; if(!p2.skip[k]) delete p2.skip[k];
+    save(); clearForm(false); renderRecord(); autoFillNext(false);
+    toast('Пропуск отменён');
+  }, 4000, 'check');
 }
 async function closePlan(){
   if(DB.active.wId && !await ask('Убрать программу с экрана? Тренировка продолжится, но подсказки и автоподстановка по программе пропадут.','Убрать')) return;
@@ -4703,6 +4736,8 @@ document.addEventListener('click', e=>{
     case 'orm-quick':        ormQuick(id); break;
     case 'pi-src':           toggleItemSrc(+el.dataset.i, el.dataset.src); break;
     case 'pi-more':          togglePiMore(+el.dataset.i); break;
+    case 'pi-all':           togglePiAll(); break;
+    case 'set-skip':         skipSet(+el.dataset.i); break;
     case 'di-copy':          dayItemCopy(+el.dataset.i); break;
     case 'fill-chip':        fillChip(el.dataset.src, +el.dataset.i); break;
     case 'hint-note':        el.classList.toggle('open'); break;
