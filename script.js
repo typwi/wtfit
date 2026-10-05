@@ -458,10 +458,15 @@ function exPR(exId, exceptId){
   return {maxW, e1: e8||e12||eAny, byW};
 }
 // лучший рабочий подход по записям (до 8 повторов, иначе до 12, иначе любой) — для текущего 1ПМ без тестов
+/* Учитываются только подходы с самым большим весом упражнения в своей тренировке:
+   дроп-сеты и облегчённые «бэк-офф» подходы (меньше вес, до отказа) не опускают текущий 1ПМ. */
 function autoOrmRec(exId){
   let best=null, bestV=0, tier=9;
+  const top={};
+  DB.records.forEach(r=>{ if(r.exId===exId && !r.warm && r.wId!=null) top[r.wId]=Math.max(top[r.wId]||0, loadOf(r)); });
   DB.records.forEach(r=>{
     if(r.exId!==exId || r.warm || !(loadOf(r)>0) || !r.reps) return;
+    if(r.wId!=null && loadOf(r) < top[r.wId]-1e-9) return;
     const t = r.reps<=8 ? 0 : r.reps<=12 ? 1 : 2, v=e1rm(loadOf(r), r.reps);
     if(t<tier || (t===tier && v>bestV)){ tier=t; bestV=v; best=r; }
   });
