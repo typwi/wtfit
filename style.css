@@ -808,3 +808,16 @@ button.hs.hs-skip{display:inline-flex;align-items:center;gap:2px;background:tran
 .pig .pi{margin-left:10px}
 .pi.cont .pi-ac{display:none}
 .pi.cont .pi-head .pi-num{margin-right:auto}
+
+/* ===== автокопия в GitHub ===== */
+.cloud-btn span{display:flex;flex-direction:column;align-items:flex-start;text-align:left;min-width:0}
+.cloud-btn small{font-size:11px;font-weight:500;opacity:.75;white-space:normal;line-height:1.3;margin-top:2px}
+.cloud-line{font-size:14px;margin:4px 0 10px}
+.cloud-status{color:var(--ok)}
+.cloud-status.err,.cloud-btn small.err{color:var(--bad);opacity:1}
+.cloud-steps{margin:0 0 6px;padding-left:20px;font-size:13px;line-height:1.45;color:var(--muted)}
+.cloud-steps li{margin-bottom:6px}
+.cloud-steps a{color:var(--accent)}
+.cloud-steps b{color:var(--txt)}
+.cloud-btn small.cloud-status{color:inherit}
+.cloud-btn small.cloud-status.err{color:#ffd0d8}

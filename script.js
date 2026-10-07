@@ -772,7 +772,7 @@ function homeHintHtml(){
 }
 function renderNotices(){
   const box=$('#recNotice');
-  if(box) box.innerHTML=updateHtml()+freshHtml()+homeHintHtml()+backupWarnHtml();
+  if(box) box.innerHTML=updateHtml()+freshHtml()+homeHintHtml()+(cloudOn()?cloudWarnHtml():backupWarnHtml());
 }
 
 /* ================== НАВИГАЦИЯ ================== */
@@ -1275,7 +1275,7 @@ async function stopWorkout(){
   if(w){ w.end=Date.now(); w.timed=true; had=DB.records.some(r=>r.wId===w.id); }
   cleanupWorkouts(); save();
   renderWorkoutBar(); refresh(); syncWake();
-  if(had) openSummary(w.id);
+  if(had){ openSummary(w.id); cloudPush(false); }
   else toast('Пустая тренировка не сохранена');
 }
 
@@ -1448,7 +1448,9 @@ function openSummary(wId){
     html+=`<div class="sum-block muted">Похожих прошлых тренировок пока нет — сравнение появится в следующий раз.</div>`;
   }
   // полная копия — после каждой тренировки; давно не было — блок заметнее
-  { const due=backupDue(), n=workoutsSinceBackup();
+  if(cloudOn()) html+=`<div class="sum-block backup-block calm"><div class="sum-title">${I('save','sm')}Автокопия в GitHub</div>
+      <div class="muted cloud-line"><span class="cloud-status${cloud.err?' err':''}">${esc(cloudStatusText(cloudDirty()&&navigator.onLine?'отправляется…':''))}</span></div></div>`;
+  else { const due=backupDue(), n=workoutsSinceBackup();
     html+=`<div class="sum-block backup-block${due?'':' calm'}">
       <div class="sum-title">${I('save','sm')}Полная копия</div>
       <div class="muted">${DB.lastExport?`Последняя — ${fmtDate(DB.lastExport)}${n?`, после неё ${n} ${plural(n,'тренировка','тренировки','тренировок')}`:''}.`:'Копии ещё нет.'}${due?' Данные хранятся только в этом приложении: удалите иконку или смените адрес — они пропадут.':' Сохраните и эту тренировку — одно нажатие.'}</div>
@@ -3947,9 +3949,10 @@ function openDataSheet(){
     <div class="sheet-head"><h2>Данные</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
     <p class="muted">Всё хранится только на этом устройстве: ${nW} ${plural(nW,'тренировка','тренировки','тренировок')}, ${DB.records.length} ${plural(DB.records.length,'запись','записи','записей')}, ${DB.exercises.length} ${plural(DB.exercises.length,'упражнение','упражнения','упражнений')}, ${DB.programs.length} ${plural(DB.programs.length,'программа','программы','программ')}.<br>
     ${DB.lastExport?'Последняя полная копия: '+fmtDate(DB.lastExport)+' '+fmtTime(DB.lastExport):'Полных копий ещё не было.'}<br>
-    Если удалить иконку с экрана «Домой» или открыть приложение по другому адресу, данные не перенесутся — вернуть их можно только из полной копии.</p>
+    Если удалить иконку с экрана «Домой» или открыть приложение по другому адресу, данные не перенесутся — вернуть их можно только из ${cloudOn()?'автокопии в GitHub или полной копии':'полной копии'}.</p>
     <p class="muted" id="persistInfo">Защита хранилища: проверяется…</p>
-    <button class="btn big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
+    <button class="btn${cloudOn()?' ghost':''} big cloud-btn" data-act="cloud-open">${I('save')}<span>Автокопия в GitHub<small class="cloud-status${cloud.err?' err':''}">${esc(cloudStatusText())}</small></span></button>
+    <button class="btn${cloudOn()?' ghost':''} big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
     <button class="btn ghost big" data-act="import" data-kind="backup">${I('swap')}Восстановить из копии</button>
     <button class="btn ghost big" data-act="export">${I('upload')}Выгрузить записи (таблица)</button>
     <button class="btn danger big" data-act="clear-all">${I('trash')}Удалить все данные</button>`);
@@ -4417,6 +4420,179 @@ async function restoreBackup(){
   toast('Данные восстановлены из копии', null, null, 3500, 'check');
 }
 
+/* ================== АВТОКОПИЯ В GITHUB ==================
+   Полная копия сама уходит в приватный репозиторий пользователя (файл wtfit-backup.json):
+   после каждой тренировки, при сворачивании/открытии приложения (если данные менялись) и при появлении сети.
+   Каждая отправка — коммит, поэтому GitHub хранит историю всех копий.
+   Настройки (репозиторий и ключ) лежат отдельно от базы и в полную копию не попадают.
+   Защита: если на телефоне вдруг намного меньше записей, чем в последней копии, автоотправка
+   останавливается — чтобы случайно очищенные данные не затёрли копию. */
+const CLOUD_KEY='fitness_cloud', CLOUD_FILE='wtfit-backup.json';
+let cloud={};
+try{ cloud=JSON.parse(localStorage.getItem(CLOUD_KEY)||'{}')||{}; }catch(e){ cloud={}; }
+let cloudBusy=false;
+function cloudSave(){ try{ localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); }catch(e){} }
+const cloudOn = () => !!(cloud.on && cloud.repo && cloud.token);
+function strHash(str){ let h=0x811c9dc5; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return (h>>>0).toString(36)+':'+str.length; }
+function b64utf8(str){
+  const b=new TextEncoder().encode(str); let s='';
+  for(let i=0;i<b.length;i+=0x8000) s+=String.fromCharCode.apply(null, b.subarray(i,i+0x8000));
+  return btoa(s);
+}
+// «https://github.com/user/repo», «github.com/user/repo.git», «user/repo» → «user/repo»
+function parseRepo(v){
+  const m=String(v||'').trim().replace(/\.git$/,'').replace(/\/+$/,'').match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+)$/);
+  return m ? m[1]+'/'+m[2] : '';
+}
+async function gh(path, opt={}, raw=false){
+  const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(), 25000);
+  try{
+    const r=await fetch('https://api.github.com'+path, Object.assign({}, opt, {signal:ctl.signal, cache:'no-store',
+      headers:Object.assign({'Authorization':'Bearer '+cloud.token, 'Accept':raw?'application/vnd.github.raw+json':'application/vnd.github+json',
+        'X-GitHub-Api-Version':'2022-11-28'}, opt.body?{'Content-Type':'application/json'}:{})}));
+    const body = raw ? await r.text() : await r.json().catch(()=>({}));
+    return {s:r.status, ok:r.ok, body};
+  }catch(e){ return {s:0, ok:false, body:null}; }    // нет сети / таймаут
+  finally{ clearTimeout(t); }
+}
+function ghErr(s){
+  if(s===0) return '';                                             // нет сети — не ошибка, отправится позже
+  if(s===401) return 'ключ не подходит или истёк срок — создайте новый';
+  if(s===403) return 'у ключа нет права записи (Contents: Read and write) или GitHub временно ограничил запросы';
+  if(s===404) return 'репозиторий не найден или ключ к нему не допущен';
+  if(s===422 || s===409) return 'GitHub не принял файл — попробуйте ещё раз';
+  return 'ошибка GitHub ('+s+')';
+}
+const contentsPath = () => `/repos/${cloud.repo}/contents/${CLOUD_FILE}`;
+async function cloudRemoteSha(){
+  const r=await gh(contentsPath());
+  if(r.ok && r.body && r.body.sha) return {sha:r.body.sha};
+  return {sha:null, s:r.s};
+}
+/* отправить копию; force — даже если данные не менялись и вопреки защите от «пустой» базы */
+async function cloudPush(force){
+  if(!cloudOn() || cloudBusy) return false;
+  const payload=backupData(), dataStr=JSON.stringify(payload.data), h=strHash(dataStr), n=DB.records.length;
+  if(!force && h===cloud.hash) return true;
+  if(!force && isEmptyDB()) return false;                 // пустую базу сама не отправляет никогда
+  if(!force && cloud.n>20 && n<cloud.n*0.5){
+    cloud.err=`на телефоне ${n} ${plural(n,'запись','записи','записей')}, а в последней копии ${cloud.n} — автоотправка приостановлена, чтобы не затереть копию. Если всё верно, нажмите «Отправить сейчас»`;
+    cloud.pend=false; cloudSave(); renderNotices(); return false;
+  }
+  if(!navigator.onLine){ cloud.pend=true; cloudSave(); return false; }
+  cloudBusy=true; cloudUi('отправляется…');
+  try{
+    const now=new Date();
+    const body=c=>JSON.stringify(Object.assign({message:`WTFIT · ${fmtDate(now.getTime())} ${fmtTime(now.getTime())} · ${n} ${plural(n,'запись','записи','записей')}`,
+      content:b64utf8(JSON.stringify(payload))}, c?{sha:c}:{}));
+    let r=await gh(contentsPath(), {method:'PUT', body:body(cloud.sha)});
+    if(!r.ok && r.s && r.s!==401 && r.s!==403){            // файл изменился или удалён в GitHub — узнать текущую версию и повторить
+      const x=await cloudRemoteSha();
+      if(x.sha || x.s===404) r=await gh(contentsPath(), {method:'PUT', body:body(x.sha)});
+    }
+    if(r.ok){
+      cloud.sha=r.body && r.body.content && r.body.content.sha; cloud.hash=h; cloud.n=n; cloud.last=Date.now(); cloud.err=''; cloud.pend=false;
+      cloudSave();
+      DB.lastExport=cloud.last; save();                     // напоминания о ручной копии больше не нужны
+      cloudUi(); renderNotices();
+      return true;
+    }
+    // ключ/доступ — ждать, пока поправят; сеть и временные сбои — повторить при следующем случае
+    cloud.pend=![401,403,404].includes(r.s); cloud.err=ghErr(r.s); cloudSave(); cloudUi(); renderNotices();
+    return false;
+  } finally { cloudBusy=false; }
+}
+// данные менялись после последней отправки
+function cloudDirty(){ return cloudOn() && strHash(JSON.stringify(backupData().data))!==cloud.hash; }
+// тихая отправка по событиям: не чаще, чем раз в minGap минут
+function cloudAuto(minGap){
+  if(!cloudOn() || cloudBusy) return;
+  if(cloud.err && !cloud.pend) return;
+  if(minGap && cloud.last && Date.now()-cloud.last < minGap*60000) return;
+  if(cloudDirty()) cloudPush(false);
+}
+function cloudStatusText(busy){
+  if(busy) return busy;
+  if(!cloudOn()) return 'выключена';
+  if(cloud.err) return 'не работает: '+cloud.err;
+  const t=cloud.last ? `последняя копия ${fmtDate(cloud.last)} ${fmtTime(cloud.last)}` : 'копий ещё не было';
+  return t+(cloud.pend?' · новая отправится, когда появится сеть':'');
+}
+// обновить строку статуса там, где она сейчас на экране
+function cloudUi(busy){
+  $$('.cloud-status').forEach(el=>{ el.textContent=cloudStatusText(busy); el.classList.toggle('err', !busy && !!cloud.err); });
+}
+function cloudWarnHtml(){
+  if(!cloudOn()) return '';
+  const stale = cloud.last && Date.now()-cloud.last>7*DAY && cloudDirty();
+  if(!cloud.err && !stale) return '';
+  return `<div class="warn-line" data-act="cloud-open">${I('alert')}<span>Автокопия в GitHub ${cloud.err?'не работает: '+esc(cloud.err):'не отправлялась с '+fmtDate(cloud.last)+' — нет сети?'} — нажмите</span></div>`;
+}
+function openCloud(){
+  const on=cloudOn();
+  openModal(`<div class="sheet-head"><h2>Автокопия в GitHub</h2>${closeX()}</div>
+    <p class="muted">Полная копия сама уходит в ваш <b>приватный</b> репозиторий после каждой тренировки. GitHub хранит историю всех копий. Восстановить — одной кнопкой на любом телефоне или адресе приложения.</p>
+    <div class="cloud-line">Статус: <span class="cloud-status${cloud.err?' err':''}">${esc(cloudStatusText())}</span></div>
+    ${on?`<div class="muted" style="margin:6px 0 4px">Репозиторий: <b>${esc(cloud.repo)}</b> · файл ${CLOUD_FILE}</div>
+      <button class="btn big" data-act="cloud-push">${I('upload')}Отправить сейчас</button>
+      <button class="btn ghost big" data-act="cloud-restore">${I('swap')}Восстановить из GitHub</button>
+      <button class="btn ghost big" data-act="cloud-setup">${I('edit')}Изменить репозиторий или ключ</button>
+      <button class="btn danger big" data-act="cloud-off">Выключить автокопию</button>`
+    :`<button class="btn big" data-act="cloud-setup">${I('save')}Настроить</button>`}`);
+}
+function openCloudSetup(){
+  openModal(`<div class="sheet-head"><h2>Настройка автокопии</h2>${closeX()}</div>
+    <ol class="cloud-steps">
+      <li>Создайте <b>приватный</b> репозиторий, например <b>wtfit-data</b>: <a href="https://github.com/new" target="_blank" rel="noopener">github.com/new</a> → Private → Create.</li>
+      <li>Создайте ключ: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Fine-grained token</a> → Repository access: <b>Only select repositories</b> → этот репозиторий → Permissions → <b>Contents: Read and write</b>. Срок — самый долгий из предложенных. Скопируйте ключ.</li>
+      <li>Вставьте ниже и нажмите «Проверить и включить».</li>
+    </ol>
+    <label for="clRepo">Репозиторий</label>
+    <input id="clRepo" value="${esc(cloud.repo||'')}" placeholder="имя/wtfit-data или ссылка" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <label for="clToken">Ключ</label>
+    <input id="clToken" type="password" value="${esc(cloud.token||'')}" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <p class="muted" style="margin-top:8px">Ключ хранится только на этом телефоне и в полную копию не попадает. Он может только читать и записывать файлы в одном этом репозитории.</p>
+    <button class="btn big" data-act="cloud-check">${I('check')}Проверить и включить</button>`);
+}
+async function cloudCheck(){
+  const repo=parseRepo($('#clRepo').value), token=String($('#clToken').value||'').trim();
+  markBad($('#clRepo'), !repo); markBad($('#clToken'), !token);
+  if(!repo || !token){ toast('Укажите репозиторий и ключ'); return; }
+  const prev=Object.assign({}, cloud);
+  cloud=Object.assign({}, cloud, {repo, token});
+  const btn=$('[data-act="cloud-check"]'); if(btn){ btn.disabled=true; btn.textContent='Проверяю…'; }
+  const fail=msg=>{ cloud=prev; if(btn){ btn.disabled=false; btn.innerHTML=I('check')+'Проверить и включить'; } ask(msg,'OK',false,null); };
+  const r=await gh(`/repos/${repo}`);
+  if(!r.ok) return fail(r.s ? 'Не получилось: '+ghErr(r.s)+'.' : 'Нет связи с GitHub — проверьте интернет.');
+  if(!r.body.private) return fail('Репозиторий <b>публичный</b> — копию сможет открыть кто угодно. Сделайте его приватным (Settings → Danger Zone → Change visibility) или создайте новый приватный.');
+  // другой репозиторий — прежняя версия файла ничего не значит
+  if(prev.repo!==repo){ cloud.sha=null; cloud.hash=''; cloud.n=0; cloud.last=0; }
+  const remote=await gh(contentsPath());
+  cloud.on=true; cloud.err=''; cloudSave();
+  if(remote.ok && remote.body && remote.body.sha){
+    cloud.sha=remote.body.sha; cloudSave();
+    if(isEmptyDB()){ toast('Автокопия включена', null, null, 2000, 'check'); cloudRestore(); return; }
+    const a=await ask(`В репозитории уже есть копия. Что сделать?<br><br><b>Восстановить</b> — заменить данные на телефоне копией из GitHub.<br><b>Отправить</b> — заменить копию в GitHub данными с телефона (прежняя останется в истории GitHub).`, 'Восстановить', false, 'Отправить');
+    if(a===true){ cloudRestore(); return; }
+    if(a===null){ cloud=prev; cloudSave(); if(btn){ btn.disabled=false; btn.innerHTML=I('check')+'Проверить и включить'; } return; }   // передумал — ничего не включаем
+  }
+  const ok=await cloudPush(true);
+  if(ok){ openCloud(); toast('Автокопия включена, первая копия отправлена', null, null, 3000, 'check'); }
+  else { const e=cloud.err; cloud.on=false; cloudSave(); fail('Не получилось записать файл: '+(e||'нет связи с GitHub')+'.'); }
+}
+async function cloudRestore(){
+  if(!cloudOn()) return;
+  toast('Загружаю копию из GitHub…', null, null, 1500);
+  const r=await gh(contentsPath(), {}, true);
+  if(r.ok){ previewBackup(r.body); return; }
+  ask(r.s===404 ? 'В репозитории ещё нет копии.' : 'Не получилось загрузить: '+(ghErr(r.s)||'нет связи с GitHub')+'.','OK',false,null);
+}
+async function cloudOff(){
+  if(!await ask('Выключить автокопию? Копии в GitHub останутся, ключ будет удалён с телефона.','Выключить',true)) return;
+  cloud={}; cloudSave(); renderNotices(); openCloud();
+}
+window.addEventListener('online', ()=>cloudAuto(0));
+
 function headerRow(rows){ return rows.findIndex(r=>r.some(c=>normHead(c).startsWith('упражн'))); }
 
 const ENCODING_HELP='Похоже, файл сохранён не в UTF-8 и русские буквы испортились. В Excel сохраните таблицу как <b>«CSV UTF-8 (разделители — запятые)»</b>, в Numbers — Файл → Экспорт → CSV (кодировка Unicode UTF-8).';
@@ -4817,6 +4993,12 @@ document.addEventListener('click', e=>{
     case 'backup-now':       backupNow(); break;
     case 'fresh-off':        try{ localStorage.setItem(FRESH_KEY,'1'); }catch(_){} renderNotices(); break;
     case 'backup-restore':   restoreBackup(); break;
+    case 'cloud-open':       openCloud(); break;
+    case 'cloud-setup':      openCloudSetup(); break;
+    case 'cloud-check':      cloudCheck(); break;
+    case 'cloud-push':       cloudPush(true).then(ok=>toast(ok?'Копия отправлена':'Не отправлено: '+(cloud.err||'нет связи с GitHub'), null, null, 3000, ok?'check':'alert')); break;
+    case 'cloud-restore':    cloudRestore(); break;
+    case 'cloud-off':        cloudOff(); break;
     case 'import-prog-run':  runProgramImport(); break;
     case 'app-reload':       location.reload(); break;
     case 'hint-off':         try{ localStorage.setItem(HINT_KEY,'1'); }catch(_){} renderNotices(); break;
@@ -4884,7 +5066,8 @@ document.addEventListener('keydown', e=>{
 });
 
 document.addEventListener('visibilitychange', ()=>{
-  if(document.hidden) return;
+  if(document.hidden){ cloudAuto(DB.active.wId?15:0); return; }
+  cloudAuto(30);
   renderWorkoutBar();
   try{ if(AC && AC.state!=='running') AC.resume().catch(()=>{}); }catch(_){}   // разбудить звук после сворачивания
   if(DB.active.restEnd) tickRest();
@@ -4949,6 +5132,7 @@ if('serviceWorker' in navigator && location.protocol==='https:'){
 }
 
 /* ================== СТАРТ ================== */
+setTimeout(()=>cloudAuto(0), 4000);
 initTopRest();
 initTopSave();
 if(swStart){ swTimer=setInterval(swRender, 500); }
