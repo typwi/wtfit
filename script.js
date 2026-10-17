@@ -1582,16 +1582,16 @@ function openSummary(wId){
   // полная копия — после каждой тренировки; давно не было — блок заметнее
   if(cloudOn()) html+=`<div class="sum-block backup-block calm"><div class="sum-title">${I('save','sm')}Автокопия в GitHub</div>
       <div class="muted cloud-line"><span class="cloud-status${cloud.err?' err':''}">${esc(cloudStatusText(cloudDirty()&&navigator.onLine?'отправляется…':''))}</span></div></div>`;
-  else { const due=backupDue(), n=workoutsSinceBackup();
+  else if(backupDue()){ const due=true, n=workoutsSinceBackup();
     html+=`<div class="sum-block backup-block${due?'':' calm'}">
       <div class="sum-title">${I('save','sm')}Полная копия</div>
       <div class="muted">${DB.lastExport?`Последняя — ${fmtDate(DB.lastExport)}${n?`, после неё ${n} ${plural(n,'тренировка','тренировки','тренировок')}`:''}.`:'Копии ещё нет.'}${due?' Данные хранятся только в этом приложении: удалите иконку или смените адрес — они пропадут.':' Сохраните и эту тренировку — одно нажатие.'}</div>
       <button class="btn big${due?'':' ghost'}" data-act="backup-now">${I('save')}Сохранить копию в Файлы</button></div>`; }
   html+=`<div class="grid2" style="margin-top:14px">
     <button class="btn ghost" data-act="w-open" data-id="${w.id}">Подробнее</button>
-    <button class="btn" data-act="close-modal">Готово</button></div>
-    <button class="btn ghost big" data-act="sum-share" data-id="${w.id}">${I('upload')}Поделиться картинкой</button>`;
-  openModal(html);
+    <button class="btn" data-act="close-modal">Готово</button></div>`;
+  openModal(html.replace(`${closeX()}</div>`, `<span class="head-btns">${moreBtn()}${closeX()}</span></div>`+morePanel(
+    `<button class="btn ghost" data-act="sum-share" data-id="${w.id}">${I('upload')}Картинка</button><button class="btn ghost" data-act="w-export" data-id="${w.id}">${I('download')}Таблица</button>`)));
 }
 function renderWorkoutBar(){
   const w=activeW(), bar=$('#timerBar'), btn=$('#btnTimer');
@@ -2696,7 +2696,8 @@ function openWorkout(id){
   recs.forEach(r=>{ if(!by.has(r.exId)){ by.set(r.exId,[]); order.push(r.exId); } by.get(r.exId).push(r); });
   const gaps=buildGaps();
 
-  let html=`<div class="sheet-head"><h2>Тренировка #${workoutNumber(id)}</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></div>
+  let html=`<div class="sheet-head"><h2>Тренировка #${workoutNumber(id)}</h2><span class="head-btns">${recs.length?moreBtn():''}<button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${I('x')}</button></span></div>
+    ${recs.length?morePanel(`<button class="btn ghost" data-act="sum-share" data-id="${w.id}">${I('upload')}Картинка</button><button class="btn ghost" data-act="w-export" data-id="${w.id}">${I('download')}Таблица</button>`):''}
     <div class="muted" style="margin-bottom:4px">${WD[d.getDay()]}, ${fmtDate(w.start)} · ${fmtTime(w.start)}${isActive(w)?' · <span class="badge">идёт</span>':''}</div>
     <button class="workout-plan w-label-btn" style="margin-bottom:12px" data-act="w-rename" data-id="${w.id}">${I('clip','sm')}${w.plan?esc(w.plan):'Добавить подпись'}${I('edit','sm')}</button>
     <div class="stats-summary">
@@ -2718,9 +2719,6 @@ function openWorkout(id){
   if(!recs.length) html+='<div class="empty">Записей пока нет</div>';
   else html+=`<p class="muted" style="margin:10px 2px 0">${I('pause','sm')}— отдых перед подходом (время от предыдущей записи). Нажмите на запись, чтобы исправить или удалить её.</p>`;
   html+=`<button class="btn big" style="margin-top:14px" data-act="w-addrec" data-id="${w.id}">${I('plus')}Добавить упражнение</button>`;
-  if(recs.length) html+=`<div class="grid2" style="margin-top:10px">
-    <button class="btn ghost" data-act="sum-share" data-id="${w.id}">${I('upload')}Картинка</button>
-    <button class="btn ghost" data-act="w-export" data-id="${w.id}">${I('download')}Таблица</button></div>`;
   if(recs.length && !isActive(w)) html+=`<button class="btn ok big" data-act="w-repeat" data-id="${w.id}">${I('repeat')}Повторить тренировку</button>`;
   if(recs.length) html+=`<button class="btn ghost big" data-act="w-toprog" data-id="${w.id}">${I('clip')}Добавить в программу</button>`;
   const fin=!isActive(w);
@@ -2844,7 +2842,7 @@ let statsMode='cards', tblEx='all', tblPeriod='all';
 function renderStats(){
   const top=$('#statsTop'), body=$('#statsBody'), warn=$('#statsWarn');
   $$('#statsSeg button').forEach(b=>b.classList.toggle('active', b.dataset.mode===statsMode));
-  warn.innerHTML=backupWarnHtml();
+  warn.innerHTML=cloudOn() ? cloudWarnHtml() : backupWarnHtml();
   if(statsMode==='measures'){ top.innerHTML=''; body.innerHTML=measuresHtml(); return; }
 
   const ws=sortedWorkouts();
@@ -3335,14 +3333,9 @@ let curProg=null;
 
 function renderProgList(){
   const box=$('#progList');
-  const tools=`<div class="data-row">
-      ${DB.programs.length
-        ? `<button class="btn ghost sm" data-act="prog-export-all">${I('upload')}Выгрузить все</button>`
-        : `<button class="btn ghost sm" data-act="prog-template">${I('copy')}Шаблон для Excel</button>`}
-      <button class="btn ghost sm" data-act="import" data-kind="program">${I('download')}Загрузить</button>
-    </div>`;
+  const tools='';
   if(!DB.programs.length){
-    box.innerHTML=tools+`<div class="empty">Пока нет программ.<br>Нажмите +, чтобы создать программу, добавьте прошедшую тренировку из «Статистики» или загрузите таблицу.</div>`;
+    box.innerHTML=`<div class="empty">Пока нет программ.<br>Нажмите +, чтобы создать программу, добавьте прошедшую тренировку из «Статистики» или загрузите таблицу (⋯ вверху).</div>`;
     return;
   }
   const live=DB.active.plan ? findDay(DB.active.plan.dayId) : null;
@@ -3356,6 +3349,12 @@ function renderProgList(){
 }
 
 function openProgram(id){ curProg=id; showView('program'); renderProgram(); }
+function openProgListMenu(){
+  openModal(`<div class="sheet-head"><h2>Программы</h2>${closeX()}</div>
+    <button class="btn ghost big" data-act="import" data-kind="program">${I('download')}Загрузить таблицу</button>
+    ${DB.programs.length?`<button class="btn ghost big" data-act="prog-export-all">${I('upload')}Выгрузить все программы</button>`:''}
+    <button class="btn ghost big" data-act="prog-template">${I('copy')}Шаблон для Excel</button>`);
+}
 
 function renderProgram(){
   const p=progById(curProg);
@@ -3498,6 +3497,10 @@ const grpDesc = (it, shown) => `<div class="rec-main"><div class="rec-desc pg-de
 function warmSumHtml(labels, done){
   return `<div class="warm-sum" data-act="wlist-toggle">${WARM_TAG}<span class="warm-sum-t">${labels.length} ${plural(labels.length,'подход','подхода','подходов')}${done?' '+I('check','sm'):''} · ${esc(labels.join(', '))}</span>${I('down','sm')}</div>`;
 }
+/* ⋯ в шапке окна: редкие действия (картинка, таблица) — в выпадающей панели под шапкой */
+const moreBtn = () => `<button class="icon-btn" data-act="more-toggle" aria-label="Ещё">${I('more')}</button>`;
+const morePanel = btns => `<div class="more-panel">${btns}</div>`;
+function moreToggle(el){ const p=el.closest('.sheet, #modalSheet').querySelector('.more-panel'); if(p) p.classList.toggle('open'); }
 function warmToggle(el){ const b=el.closest('.ex-block, .pg'); if(b) b.classList.toggle('wopen'); }
 
 /* ---- тренировка программы ---- */
@@ -4588,6 +4591,7 @@ function openDataSheet(){
     <button class="btn${cloudOn()?' ghost':''} big" data-act="backup">${I('save')}Полная копия (всё в одном файле)</button>
     <button class="btn ghost big" data-act="import" data-kind="backup">${I('swap')}Восстановить из копии</button>
     <button class="btn ghost big" data-act="export">${I('upload')}Выгрузить записи (таблица)</button>
+    <button class="btn ghost big" data-act="import" data-kind="records">${I('download')}Загрузить записи (таблица)</button>
     <button class="btn danger big" data-act="clear-all">${I('trash')}Удалить все данные</button>`);
   const setInfo=t=>{ const el=$('#persistInfo'); if(el) el.textContent='Защита хранилища: '+t; };
   const unknown='этот браузер не сообщает — регулярно делайте полную копию.';
@@ -5521,6 +5525,126 @@ async function clearAll(){
   toast('Все данные удалены');
 }
 
+/* ================== ЖЕСТЫ ==================
+   • влево / вправо по экрану — соседний раздел (Запись ↔ Программы ↔ Упражнения ↔ Статистика);
+     на вложенных экранах (программа, упражнение) вправо — назад;
+   • окно снизу — потянуть вниз, когда оно прокручено до верха, — закрыть (несохранённое — как при «×»);
+   • запись подхода (сегодня, история упражнения, тренировка) — влево, «Удалить», с «Отменить».
+   В полях ввода и в рядах с горизонтальной прокруткой жесты не перехватываются. */
+const TABS=['record','prog','ex','stats'];
+const SWIPE_ROWS='.rec-row[data-act="rec-edit"], .set-line[data-act="rec-edit"]';
+let G=null, swipedRow=null, noClickUntil=0;
+function hScrollable(el){
+  for(let n=el; n && n.nodeType===1 && n!==document.body; n=n.parentElement){
+    if(n.id==='scroller' || n.id==='modalSheet') return false;
+    if(n.scrollWidth>n.clientWidth+2){ const ox=getComputedStyle(n).overflowX; if(ox==='auto' || ox==='scroll') return true; }
+  }
+  return false;
+}
+const isField = el => !!(el && el.closest && el.closest('input, textarea, select, [contenteditable="true"]'));
+function resetRow(row){
+  if(!row) return;
+  row.style.transition='transform .18s'; row.style.transform=''; row.classList.remove('swiped');
+  if(swipedRow===row) swipedRow=null;
+}
+document.addEventListener('touchstart', e=>{
+  if(e.touches.length!==1){ G=null; return; }
+  const t=e.touches[0], tg=e.target;
+  if(swipedRow && !swipedRow.contains(tg)){ resetRow(swipedRow); noClickUntil=Date.now()+400; G=null; return; }
+  if($('#dialog').classList.contains('show')){ G=null; return; }
+  G={x:t.clientX, y:t.clientY, t:Date.now(), mode:null, dx:0, dy:0, inModal:$('#modal').classList.contains('show'), sheet:$('#modalSheet'),
+     row: tg.closest ? tg.closest(SWIPE_ROWS) : null, field:isField(tg), hs:hScrollable(tg)};
+}, {passive:true});
+document.addEventListener('touchmove', e=>{
+  if(!G) return;
+  const t=e.touches[0]; G.dx=t.clientX-G.x; G.dy=t.clientY-G.y;
+  const adx=Math.abs(G.dx), ady=Math.abs(G.dy);
+  if(!G.mode){
+    if(adx<10 && ady<10) return;
+    if(adx>ady*1.4 && !G.field && !G.hs) G.mode = G.row ? 'row' : (G.inModal ? 'none' : 'tab');
+    else if(G.dy>0 && ady>adx && G.inModal && !G.field && G.sheet.scrollTop<=0) G.mode='sheet';
+    else G.mode='none';
+    if(G.mode==='row'){ G.base=G.row.classList.contains('swiped') ? -88 : 0; G.row.style.transition=''; }
+    if(G.mode==='sheet') G.sheet.style.transition='';
+  }
+  if(G.mode==='row'){ e.preventDefault(); G.row.style.transform=`translateX(${Math.max(-120, Math.min(0, G.base+G.dx))}px)`; }
+  else if(G.mode==='sheet'){ e.preventDefault(); G.sheet.style.transform=`translateY(${Math.max(0, G.dy)}px)`; }
+}, {passive:false});
+document.addEventListener('touchend', ()=>{
+  const g=G; G=null; if(!g || !g.mode || g.mode==='none') return;
+  const dt=Math.max(1, Date.now()-g.t);
+  if(g.mode==='row'){
+    noClickUntil=Date.now()+350;
+    if(g.base+g.dx < -50){
+      if(swipedRow && swipedRow!==g.row) resetRow(swipedRow);
+      g.row.style.transition='transform .18s'; g.row.style.transform='translateX(-88px)'; g.row.classList.add('swiped'); swipedRow=g.row;
+    } else resetRow(g.row);
+  } else if(g.mode==='sheet'){
+    if(g.dy>110 || (g.dy>45 && g.dy/dt>0.6)) sheetSwipeClose(g.sheet);
+    else { g.sheet.style.transition='transform .2s'; g.sheet.style.transform=''; }
+  } else if(g.mode==='tab'){
+    if(Math.abs(g.dx)<70 || dt>700) return;
+    noClickUntil=Date.now()+350;
+    swipeNav(g.dx<0 ? 1 : -1);
+  }
+}, {passive:true});
+document.addEventListener('touchcancel', ()=>{
+  if(G && G.mode==='sheet'){ G.sheet.style.transition='transform .2s'; G.sheet.style.transform=''; }
+  if(G && G.mode==='row') resetRow(G.row);
+  G=null;
+}, {passive:true});
+// клик сразу после жеста — не нажатие; у сдвинутой записи нажатие на «Удалить» — удалить, на саму запись — вернуть
+document.addEventListener('click', e=>{
+  const row=e.target.closest && e.target.closest(SWIPE_ROWS);
+  if(row && row.classList.contains('swiped')){
+    e.stopPropagation(); e.preventDefault();
+    if(e.clientX > row.getBoundingClientRect().right-1) swipeDelete(+row.dataset.id);
+    else resetRow(row);
+    return;
+  }
+  if(Date.now()<noClickUntil){ e.stopPropagation(); e.preventDefault(); }
+}, true);
+function sheetSwipeClose(sh){
+  sh.style.transition='transform .18s'; sh.style.transform='translateY(100%)';
+  setTimeout(()=>{ guardClose(closeModal); setTimeout(()=>{ sh.style.transition='transform .2s'; sh.style.transform=''; setTimeout(()=>{ sh.style.transition=''; }, 220); }, 20); }, 170);
+}
+function swipeNav(dir){
+  if(curView==='program' || curView==='history'){
+    if(dir<0){ if(curView==='program'){ curProg=null; go('prog'); } else { histEx=null; go('ex'); } viewAnim(-1); }
+    return;
+  }
+  const i=TABS.indexOf(curView), j=i+dir;
+  if(i<0 || j<0 || j>=TABS.length) return;
+  go(TABS[j]); viewAnim(dir);
+}
+function viewAnim(dir){
+  const v=$('#view-'+curView); if(!v) return;
+  v.classList.remove('enter-l','enter-r'); void v.offsetWidth;
+  v.classList.add(dir>0 ? 'enter-r' : 'enter-l');
+  setTimeout(()=>v.classList.remove('enter-l','enter-r'), 260);
+}
+// удалить запись свайпом — сразу, с «Отменить»
+function swipeDelete(id){
+  const i=DB.records.findIndex(r=>r.id===id); if(i<0) return;
+  const rec=DB.records[i], wasTest=isTestRec(rec), w0=wById(rec.wId), wCopy=w0 ? Object.assign({}, w0) : null;
+  DB.records.splice(i,1); swipedRow=null;
+  if(wasTest) refreezeEx(rec.exId);
+  cleanupWorkouts(); save();
+  afterSwipeDel(rec.wId);
+  toast('Запись удалена', 'Отменить', ()=>{
+    if(DB.records.some(r=>r.id===rec.id)) return;
+    DB.records.push(rec);
+    if(wCopy && !wById(wCopy.id)) DB.workouts.push(wCopy);
+    if(wasTest) refreezeEx(rec.exId);
+    save(); afterSwipeDel(rec.wId);
+    toast('Запись возвращена');
+  }, 4500, 'check');
+}
+function afterSwipeDel(wId){
+  if($('#modal').classList.contains('show') && $('#modalSheet [data-act="w-addrec"]')){ if(wById(wId)) openWorkout(wId); else closeModal(); }
+  refresh();
+}
+
 /* ================== ОБРАБОТЧИКИ ================== */
 document.addEventListener('click', e=>{
   const el=e.target.closest('[data-act]');
@@ -5611,6 +5735,8 @@ document.addEventListener('click', e=>{
     case 'pct-own':          pctOwn(); break;
     case 'tmh-del':          tmhDel(id, +el.dataset.i); break;
     case 'wlist-toggle':     warmToggle(el); break;
+    case 'more-toggle':      moreToggle(el); break;
+    case 'prog-list-menu':   openProgListMenu(); break;
     case 'orm-step':         openStepSheet(id); break;
     case 'tm-reset':         tmReset(id); break;
     case 'orm-quick':        ormQuick(id); break;
