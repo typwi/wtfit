@@ -238,9 +238,7 @@ function normItems(arr){
     rmax:(num(it.reps) && num(it.rmax)>num(it.reps) && num(it.rmax)<=1000) ? num(it.rmax) : null,
     // источник 1ПМ для «%»: c — текущий, m — ручной (старые «авто»/«лучший» → текущий)
     src: (it.src==null || it.src==='' || it.src==='m') ? 'm' : 'c',
-    test: !!it.test,
-    aw: !!it.aw && !it.warm,          // авторазминка перед этим рабочим пунктом
-    gen: !!it.gen}));                 // пункт разминки, добавленный автоматически (только в плане на сегодня)
+    test: !!it.test}));
 }
 function normPrograms(arr){
   const A=x=>Array.isArray(x)?x:[];
@@ -730,7 +728,7 @@ function planDesc(it){
   if(reps) parts.push(r.sets ? `${reps} × ${fmtNum(r.sets)} подх` : reps);
   else if(r.sets) parts.push(fmtNum(r.sets)+' подх');
   if(r.time) parts.push(fmtDur(r.time));
-  return `${it.test?'<span class="test-tag">тест 1ПМ</span> ':''}${it.aw && !it.o && !exBw(it.exId)?'<span class="aw-tag">+ разминка</span> ':''}${it.pct?`<span class="pct-lbl">${fmtNum(it.pct)}% 1ПМ</span> `:''}${esc(parts.join(' · '))||'—'}${it.rest!=null?` <span class="rest-lbl">${I('pause','sm')}${restLabel(it.rest)}</span>`:''}`;
+  return `${it.test?'<span class="test-tag">тест 1ПМ</span> ':''}${it.pct?`<span class="pct-lbl">${fmtNum(it.pct)}% 1ПМ</span> `:''}${esc(parts.join(' · '))||'—'}${it.rest!=null?` <span class="rest-lbl">${I('pause','sm')}${restLabel(it.rest)}</span>`:''}`;
 }
 function planDescPlain(it){
   return [esc(describe(it))||'—', it.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(it.rest)}</span>`:''].filter(Boolean).join(' ');
@@ -3522,7 +3520,7 @@ async function deleteDay(id){
    У уже сохранённых пунктов сразу видны упражнение, вес, повторы и подходы, остальное (источник 1ПМ,
    время, отдых, разминка, тест, заметка) — под «Ещё ▾»; в свёрнутом виде там короткая сводка. */
 let dayDraft=null;
-function emptyItem(){ return {name:'', reps:'', rmax:'', sets:'', weight:'', pct:false, src:'c', time:'', notes:'', rest:'', warm:false, aw:false, test:false, open:false, full:true}; }
+function emptyItem(){ return {name:'', reps:'', rmax:'', sets:'', weight:'', pct:false, src:'c', time:'', notes:'', rest:'', warm:false, test:false, open:false, full:true}; }
 // сводка скрытых настроек пункта: «до 10 повт · отдых 2 мин · разминка»
 function piSum(o){
   const t=v=>String(v==null?'':v).trim(), p=[];
@@ -3530,7 +3528,6 @@ function piSum(o){
   if(t(o.time)) p.push(t(o.time)+' мин');
   if(t(o.rest)) p.push(num(o.rest)===null ? 'без отдыха' : 'отдых '+t(o.rest)+' мин');
   if(o.warm) p.push('разминка');
-  if(o.aw) p.push('авторазминка');
   if(o.test) p.push('тест 1ПМ');
   if(t(o.notes)) p.push('заметка');
   return p.join(' · ');
@@ -3550,7 +3547,7 @@ function piRead(el, old){
   const g=c=>el.querySelector(c).value, ch=c=>el.querySelector(c).checked;
   return {name:g('.pi-name'), reps:g('.pi-reps'), rmax:g('.pi-rmax'), sets:g('.pi-sets'), weight:g('.pi-weight'),
     pct:el.querySelector('.pi-unit').classList.contains('pct'), src:(old&&old.src)==='m'?'m':'c',
-    time:g('.pi-time'), notes:g('.pi-notes'), rest:g('.pi-restv'), warm:ch('.pi-warmv'), aw:ch('.pi-awv'), test:ch('.pi-testv'),
+    time:g('.pi-time'), notes:g('.pi-notes'), rest:g('.pi-restv'), warm:ch('.pi-warmv'), test:ch('.pi-testv'),
     open:el.classList.contains('open'), full:el.classList.contains('full'), gc:!!(old&&old.gc)};
 }
 // свернуть / развернуть группу подходов одного упражнения (флаг хранится у первого пункта группы)
@@ -3615,7 +3612,7 @@ function openDayEdit(id, folderId){
     name: x ? x.d.name : nextName('Тренировка '+fx.f.days.length, fx.f.days.map(d=>d.name)),
     items: x ? x.d.items.map(it=>{ const e=exById(it.exId);
       return {name:e?e.name:'', reps:inVal(it.reps), rmax:inVal(it.rmax), sets:inVal(it.sets), weight:inVal(it.pct||it.weight), pct:!!it.pct, src:it.src==='m'?'m':'c', time:minIn(it.time), notes:it.notes||'',
-        rest:restIn(it.rest), warm:!!it.warm, aw:!!it.aw, test:!!it.test, open:false}; }) : []
+        rest:restIn(it.rest), warm:!!it.warm, test:!!it.test, open:false}; }) : []
   };
   if(!dayDraft.items.length) dayDraft.items.push(emptyItem());
   delete modalBase.day;                 // новое открытие редактора — новое исходное состояние
@@ -3658,7 +3655,6 @@ function piHtml(it, i, n, cont){
         ${(i===0 || !full) ? '<div class="pi-hint">«Повт. до» — диапазон: повторы 8, до 10 → «8–10»; в умном режиме, когда во всех подходах дошёл до верха, вес растёт. Отдых 0 — без отдыха; пусто — как выбрано на экране «Запись».</div>' : ''}
         <div class="pi-checks">
           <label class="check"><input type="checkbox" class="pi-warmv"${it.warm?' checked':''}>Разминка</label>
-          <label class="check" title="Перед этим пунктом сами добавятся разминочные подходы: 40%, 60%, 80% от его веса"><input type="checkbox" class="pi-awv"${it.aw?' checked':''}>Авторазминка</label>
           <label class="check"><input type="checkbox" class="pi-testv"${it.test?' checked':''}>Тест 1ПМ</label>
         </div>
         <div class="note-row pi-note-row">
@@ -3755,10 +3751,10 @@ function saveDay(){
     items.push({name:nm, reps:num(g('.pi-reps').value), rmax:num(g('.pi-rmax').value)||null, sets:num(g('.pi-sets').value), weight:isPct?null:wv2, pct:isPct?wv2:null, src:(D.items[+el.dataset.i]||{}).src==='m'?'m':'c',
       time:minOut(g('.pi-time').value), notes:g('.pi-notes').value.trim(),
       rest: rv==='' ? null : (num(rv)===null ? 0 : Math.round(num(rv)*60)), warm:g('.pi-warmv').checked,
-      aw:g('.pi-awv').checked && !g('.pi-warmv').checked, test:g('.pi-testv').checked});
+      test:g('.pi-testv').checked});
   });
   if(bad){ toast('Проверьте выделенные поля: нужно название; вес — до 100 000 кг, повторы и подходы — до 10 000, «Повт. до» — больше повторов, время — до 6 000 мин, отдых — до 600 мин', null, null, 5000, 'alert'); return; }
-  const final=items.map(it=>({exId:getOrCreateEx(it.name).id, reps:it.reps, rmax:it.rmax, sets:it.sets, weight:it.weight, pct:it.pct, src:it.src, time:it.time, notes:it.notes, warm:it.warm, aw:it.aw, rest:it.rest, test:it.test}));
+  const final=items.map(it=>({exId:getOrCreateEx(it.name).id, reps:it.reps, rmax:it.rmax, sets:it.sets, weight:it.weight, pct:it.pct, src:it.src, time:it.time, notes:it.notes, warm:it.warm, rest:it.rest, test:it.test}));
   let target=p.folders.find(f=>f.id===D.folderId) || p.folders[0];
   if(!target){ target={id:nid('prog'), name:'Неделя 1', days:[]}; p.folders.push(target); }
   let day=null;
@@ -3773,7 +3769,7 @@ function saveDay(){
   day.name=name; day.items=final;
   dayDraft=null;
   // правка дня, который идёт сейчас: у нетронутых пунктов веса остаются, новые и изменённые считаются заново
-  if(DB.active.plan && DB.active.plan.dayId===day.id){ DB.active.plan.skip={}; delete DB.active.plan.items; if(hasAutoWarm(day.items)) DB.active.plan.items=withAutoWarm(day.items); remapPk(null); const x=planCtx(); if(x) syncPlanFix(x); }
+  if(DB.active.plan && DB.active.plan.dayId===day.id){ DB.active.plan.skip={}; delete DB.active.plan.items; remapPk(null); const x=planCtx(); if(x) syncPlanFix(x); }
   save(); refresh(); openDay(day.id);
   toast('Сохранено', null, null, null, 'check');
   checkOrmNeeded(day.items);
@@ -3920,7 +3916,7 @@ function startPlan(dayId){
   // веса «% 1ПМ» считаются один раз — на всю тренировку.
   // «Продолжить тренировку» того же дня фиксацию не пересчитывает — веса остаются те же.
   const again=!!(DB.active.plan && DB.active.plan.dayId===dayId);
-  if(!again){ DB.active.plan={dayId, fx:[]}; remapPk(null); if(hasAutoWarm(x.d.items)) DB.active.plan.items=withAutoWarm(x.d.items); }
+  if(!again){ DB.active.plan={dayId, fx:[]}; remapPk(null); }
   syncPlanFix(planCtx() || x);
   const w=activeW();
   if(w){ w.plan=`${x.f.name} · ${x.d.name}`; w.planDay=x.d.id; }
@@ -4054,26 +4050,6 @@ function devHtml(ex){
   return `<div class="dev-row"><span class="dev-txt">Сделал <b>${L(d.w,d.r)}</b> вместо ${L(d.pw,d.pr,d.prx)}. ${n} — так же?</span>
     ${b(d.w, d.r, 'Да', ' yes')}<button type="button" class="dev-btn" data-act="dev-no">Нет</button></div>`;
 }
-/* Авторазминка: перед рабочим пунктом с флагом aw — подходы от его веса (по рабочему 1ПМ на старте):
-   до 30 кг — 50%×8; до 60 кг — 50%×8, 75%×4; дальше — 40%×8, 60%×5, 80%×3. Вес — по шагу упражнения.
-   У «своего веса» и пунктов без веса не добавляется. Пункты попадают в план на сегодня (gen), в программу — нет. */
-function warmSteps(W){ return W<30 ? [[0.5,8,60]] : W<60 ? [[0.5,8,60],[0.75,4,90]] : [[0.4,8,60],[0.6,5,60],[0.8,3,90]]; }
-function withAutoWarm(items, keepO){
-  const out=[];
-  items.forEach(it=>{
-    if(it.aw && !it.warm && !exBw(it.exId)){
-      const base=it.pct ? workOrm(it.exId) : 0, W=it.pct ? (base ? pctWeight(it.exId, base, it.pct) : 0) : (it.weight||0);
-      let prev=0;
-      if(W>0) warmSteps(W).forEach(([p,r,rest])=>{
-        const w=roundStep(W*p, it.exId);
-        if(w>prev && w<W){ out.push({exId:it.exId, warm:true, gen:true, weight:w, pct:null, reps:r, rmax:null, sets:1, rest, time:null, notes:'', test:false, src:'c'}); prev=w; }
-      });
-    }
-    out.push(keepO ? it : Object.assign({}, it, {o:{pct:it.pct||null, weight:it.weight==null?null:it.weight, reps:it.reps||null, rmax:it.rmax||null}}));
-  });
-  return out;
-}
-const hasAutoWarm = items => items.some(it=>it.aw && !it.warm);
 // пункты на сегодня для правки: копия дня (создаётся при первой правке), у повтора — его пункты
 function todayItems(){
   const pl=DB.active.plan; if(!pl) return null;
@@ -4128,8 +4104,8 @@ let peCtx=null;
 function peRowHtml(it, k, done, need, isNew){
   const pct=!!it.pct, base=peCtx ? workOrm(peCtx.exId) : 0;
   const calc = pct ? (base ? (it.pct ? '≈ '+wTxt(pctWeight(peCtx.exId, base, it.pct), peCtx.exId)+' кг' : '') : 'нет 1ПМ') : '';
-  return `<div class="pe-row${it.warm?' warm':''}"${k!=null?` data-k="${k}"`:' data-new="1"'}${it.gen?' data-gen="1"':''} data-done="${done||0}">
-    <div class="pe-head">${it.warm?WARM_TAG:''}${it.gen?'<span class="pe-new">авто</span>':''}${it.test?'<span class="test-tag">тест 1ПМ</span>':''}${isNew?'<span class="pe-new">новый</span>':''}
+  return `<div class="pe-row${it.warm?' warm':''}"${k!=null?` data-k="${k}"`:' data-new="1"'} data-done="${done||0}">
+    <div class="pe-head">${it.warm?WARM_TAG:''}${it.test?'<span class="test-tag">тест 1ПМ</span>':''}${isNew?'<span class="pe-new">новый</span>':''}
       <span class="muted pe-done">${need?`сделано ${done} из ${need}`:''}</span>
       <button type="button" class="pe-del" data-act="pe-del" aria-label="Убрать">${I('trash','sm')}</button></div>
     <div class="pe-grid">
@@ -4143,9 +4119,8 @@ function peRowHtml(it, k, done, need, isNew){
 function peDiffers(exId){
   const pl=DB.active.plan; if(!pl || pl.tmp || !Array.isArray(pl.items)) return false;
   const x=findDay(pl.dayId); if(!x) return false;
-  // авторазминка сравнивается по составу (вес её зависит от 1ПМ на старте)
-  const E=peOrigEx(exId), strip=a=>JSON.stringify(a.filter(it=>it.exId===E).map(it=>it.gen ? ['a',it.reps||0,it.sets||0] : [it.pct||0,it.weight||0,it.reps||0,it.rmax||0,it.sets||0,!!it.warm,!!it.test]));
-  return strip(pl.items)!==strip(withAutoWarm(x.d.items.filter(it=>it.exId===E)));
+  const E=peOrigEx(exId), strip=a=>JSON.stringify(a.filter(it=>it.exId===E).map(it=>[it.pct||0,it.weight||0,it.reps||0,it.rmax||0,it.sets||0,!!it.warm,!!it.test]));
+  return strip(pl.items)!==strip(x.d.items);
 }
 // упражнение пунктов в программе (до замены на сегодня)
 function peOrigEx(exId){ const sw=(DB.active.plan && DB.active.plan.sw)||{}; return +(Object.keys(sw).find(k=>sw[k]===exId)||exId); }
@@ -4222,13 +4197,13 @@ function peSave(to){
   const rows=[]; let bad=false;
   $$('#peRows .pe-row').forEach(row=>{
     const occ=row.dataset.k!=null ? ks.indexOf(+row.dataset.k) : null;
-    if(row.classList.contains('del')){ if(occ!=null) rows.push({occ, del:true, k:+row.dataset.k, gen:!!row.dataset.gen}); return; }
+    if(row.classList.contains('del')){ if(occ!=null) rows.push({occ, del:true}); return; }
     const v=peRead(row), pct=v.pct!=null, w=pct?v.pct:v.weight;
     const bW = w!=null && (pct ? (w<=0 || w>200) : (w>LIMITS.weight || (w<0 && !bw)));
     const bR = v.reps!=null && (v.reps<0 || v.reps>LIMITS.reps), bS = !(v.sets>=1 && v.sets<=100 && Math.round(v.sets)===v.sets), bX = v.rmax!=null && !(v.reps && v.rmax>v.reps && v.rmax<=LIMITS.reps);
     [['.pe-w',bW],['.pe-r',bR],['.pe-s',bS],['.pe-rx',bX]].forEach(([c,b])=>markBad(row.querySelector(c),b));
     if(bW||bR||bS||bX){ bad=true; return; }
-    rows.push({occ: occ<0?null:occ, v, k:row.dataset.k!=null?+row.dataset.k:null, gen:!!row.dataset.gen});
+    rows.push({occ: occ<0?null:occ, v});
   });
   if(bad){ toast('Проверьте выделенные поля: % — до 200, подходы — целое от 1, «до» — больше повторов', null, null, 3500, 'alert'); return; }
   const list=todayItems(); if(!list) return;
@@ -4240,10 +4215,7 @@ function peSave(to){
   if(to==='prog' && !pl.tmp){
     const day=findDay(pl.dayId);
     if(day){
-      // в программу — без авторазминки (она добавится сама); пункты сопоставляются без неё
-      const ng=list.map((it,i)=>i).filter(i=>list[i].exId===E && !list[i].gen);
-      const rowsP=rows.filter(r=>!r.gen).map(r=>Object.assign({}, r, {occ: r.k!=null ? ng.indexOf(r.k) : null})).map(r=>r.occ<0?Object.assign(r,{occ:null}):r);
-      day.d.items=applyRows(day.d.items, E, rowsP).out.map(it=>{ const c=Object.assign({}, it); delete c.o; delete c.gen; return c; });
+      day.d.items=applyRows(day.d.items, E, rows).out.map(it=>{ const c=Object.assign({}, it); delete c.o; return c; });
       // теперь это план программы — с ним и сравнивать
       pl.items.forEach(it=>{ if(it.exId===E) it.o={pct:it.pct||null, weight:it.weight==null?null:it.weight, reps:it.reps||null, rmax:it.rmax||null}; });
     }
@@ -4254,8 +4226,8 @@ function peSave(to){
 function peReset(){
   const P=peCtx, pl=DB.active.plan; if(!P || !pl || !Array.isArray(pl.items)) return;
   const day=findDay(pl.dayId); if(!day) return;
-  const E=peOrigEx(P.exId), src=withAutoWarm(day.d.items.filter(it=>it.exId===E)), have=pl.items.filter(it=>it.exId===E).length;
-  const rows=src.map((it,i)=>({occ:i<have?i:null, v:Object.assign({gen:false}, it)}));
+  const E=peOrigEx(P.exId), src=day.d.items.filter(it=>it.exId===E), have=pl.items.filter(it=>it.exId===E).length;
+  const rows=src.map((it,i)=>({occ:i<have?i:null, v:Object.assign({}, it, {o:{pct:it.pct||null, weight:it.weight==null?null:it.weight, reps:it.reps||null, rmax:it.rmax||null}})}));
   for(let i=src.length;i<have;i++) rows.push({occ:i, del:true});
   const res=applyRows(pl.items, E, rows);
   if(pl.skip){ const sk={}; Object.keys(pl.skip).forEach(i=>{ if(res.map[i]!=null) sk[res.map[i]]=pl.skip[i]; }); pl.skip=sk; }
@@ -4573,7 +4545,7 @@ function buildProgramRows(progs){
         d.items.forEach(it=>{
           const e=exById(it.exId);
           rows.push([p.name, f.name, d.name, e?e.name:'?', it.pct?dec(it.pct)+'%':dec(it.weight), dec(it.reps)+(it.rmax&&it.reps?'–'+dec(it.rmax):''), dec(it.sets),
-            it.time?dec(round(it.time/60,2)):'', it.rest===0?'0':(it.rest?dec(round(it.rest/60,2)):''), it.warm?'да':it.aw?'авто':'', it.test?'да':'', it.notes||'']);
+            it.time?dec(round(it.time/60,2)):'', it.rest===0?'0':(it.rest?dec(round(it.rest/60,2)):''), it.warm?'да':'', it.test?'да':'', it.notes||'']);
         });
       });
     });
@@ -5295,7 +5267,7 @@ function parsePrograms(rows){
     let rest=null;
     if(rs!==''){ const v=Number(rs); if(isFinite(v) && v>=0 && v<=LIMITS.rest*(unit.rest==='s'?60:1)) rest=Math.round(unit.rest==='s'?v:v*60); }
     const tv=normKey(g('test'));
-    d.items.push(rangeFromNotes({exName, reps, rmax:reps?rmax:null, sets, weight, pct, src, test: tv==='да'||tv==='1'||tv==='+'||tv==='yes', time, notes:g('notes'), rest, warm: wv==='да'||wv==='1'||wv==='+'||wv==='yes', aw: wv==='авто'||wv==='auto'}));
+    d.items.push(rangeFromNotes({exName, reps, rmax:reps?rmax:null, sets, weight, pct, src, test: tv==='да'||tv==='1'||tv==='+'||tv==='yes', time, notes:g('notes'), rest, warm: wv==='да'||wv==='1'||wv==='+'||wv==='yes'}));
   }
   return {programs:progs, errors, period:''};
 }
@@ -5366,7 +5338,7 @@ function applyProgramImport(PP, nameOv, replace){
   PP.programs.forEach(pp=>{
     const name = nameOv || pp.name || `Программа ${fmtDate(Date.now())}`;
     const folders=pp.folders.map(f=>({id:nid('prog'), name:f.name, days:f.days.map(d=>({id:nid('prog'), name:d.name,
-      items:d.items.map(it=>({exId:getOrCreateEx(it.exName).id, reps:it.reps, rmax:it.rmax||null, sets:it.sets, weight:it.weight, pct:it.pct||null, src:'c', test:!!it.test, time:it.time, notes:it.notes||'', warm:!!it.warm, aw:!!it.aw && !it.warm, rest:it.rest!=null?it.rest:null}))}))}));
+      items:d.items.map(it=>({exId:getOrCreateEx(it.exName).id, reps:it.reps, rmax:it.rmax||null, sets:it.sets, weight:it.weight, pct:it.pct||null, src:'c', test:!!it.test, time:it.time, notes:it.notes||'', warm:!!it.warm, rest:it.rest!=null?it.rest:null}))}))}));
     const old = replace ? DB.programs.find(p=>normKey(p.name)===normKey(name)) : null;
     if(old){ old.name=name; old.folders=folders; replaced++; lastId=old.id; }
     else{
