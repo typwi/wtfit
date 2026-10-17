@@ -163,7 +163,8 @@ function normalize(d){
       .map(r=>({id:+r.id, exId:+r.exId, wId:r.wId!=null?+r.wId:null, ts:+r.ts,
         reps:num(r.reps), sets:num(r.sets), weight:num(r.weight), time:num(r.time),
         notes:r.notes?String(r.notes):'', t1: r.t1?true:undefined, bw: num(r.bw)>0 ? num(r.bw) : undefined,
-        warm: r.warm===undefined ? /^\s*разминк/i.test(r.notes||'') : !!r.warm})),
+        warm: r.warm===undefined ? /^\s*разминк/i.test(r.notes||'') : !!r.warm,
+        pk: (r.pk!=null && Number.isInteger(+r.pk) && +r.pk>=0) ? +r.pk : undefined})),
     workouts: (Array.isArray(d.workouts)?d.workouts:[])
       .filter(w=>w && w.start)
       .map(w=>{ const o={id:+w.id, start:+w.start, end:w.end?+w.end:null, timed:!!w.timed, rest:Math.max(0,+w.rest||0), plan:w.plan?String(w.plan):'', planDay:w.planDay?+w.planDay:null};
@@ -1321,6 +1322,7 @@ function saveRecord(){
   }
   lastExKey=normKey(ex.name);
   const before=(createdEx || warmOn) ? null : exPR(ex.id);
+  { const pk=planTarget(ex.id, rec); if(pk>=0) rec.pk=pk; }
   DB.records.push(rec);
   if(rec.t1){
     // тест — свежий замер: сразу становится рабочим 1ПМ (даже если меньше прежнего)
@@ -1397,7 +1399,7 @@ async function stopWorkout(){
   if(DB.active.restEnd) cancelRest();
   const w=activeW();
   smartReview(planCtx(), w);               // умный 1ПМ (по исходному плану) — до того, как план закроется
-  devPrompt=null;
+  devPrompt=null; remapPk(null);
   DB.active.wId=null;
   DB.active.plan=null;
   let had=false;
@@ -3717,7 +3719,7 @@ function saveDay(){
   day.name=name; day.items=final;
   dayDraft=null;
   // правка дня, который идёт сейчас: у нетронутых пунктов веса остаются, новые и изменённые считаются заново
-  if(DB.active.plan && DB.active.plan.dayId===day.id){ DB.active.plan.skip={}; delete DB.active.plan.items; const x=planCtx(); if(x) syncPlanFix(x); }
+  if(DB.active.plan && DB.active.plan.dayId===day.id){ DB.active.plan.skip={}; delete DB.active.plan.items; remapPk(null); const x=planCtx(); if(x) syncPlanFix(x); }
   save(); refresh(); openDay(day.id);
   toast('Сохранено', null, null, null, 'check');
   checkOrmNeeded(day.items);
@@ -3758,7 +3760,9 @@ function planStatus(x){
       const open=cand.filter(k=>done[k]<need[k]);
       if(!open.length) break;
       let k=open[0];
-      if(open.length>1){
+      // подход сделан на конкретном пункте (зелёная точка или нажатый чип) — туда, пока в нём есть место
+      if(u===0 && r.pk!=null && open.includes(r.pk)) k=r.pk;
+      else if(open.length>1){
         if(!pw) pw=items.map((it,i)=>{ const pi=planItem(x,i); return pi ? pi.weight : null; });
         let best=Infinity;
         open.forEach(i=>{ const sc=setScore(r, pw[i], items[i].reps); if(sc<best-1e-9){ best=sc; k=i; } });
@@ -3862,7 +3866,7 @@ function startPlan(dayId){
   // веса «% 1ПМ» считаются один раз — на всю тренировку.
   // «Продолжить тренировку» того же дня фиксацию не пересчитывает — веса остаются те же.
   const again=!!(DB.active.plan && DB.active.plan.dayId===dayId);
-  if(!again) DB.active.plan={dayId, fx:[]};
+  if(!again){ DB.active.plan={dayId, fx:[]}; remapPk(null); }
   syncPlanFix(planCtx() || x);
   const w=activeW();
   if(w){ w.plan=`${x.f.name} · ${x.d.name}`; w.planDay=x.d.id; }
@@ -3885,7 +3889,7 @@ async function startRepeat(wId){
   if(planCtx() && !await ask('Сейчас идёт тренировка по программе. Заменить её повтором этой тренировки?','Заменить')) return;
   if(!DB.active.wId) startWorkout(true);
   const name=src.plan || `Тренировка #${workoutNumber(wId)}`;
-  DB.active.plan={dayId:0, fx:[], tmp:{name, date:src.start, items}};
+  DB.active.plan={dayId:0, fx:[], tmp:{name, date:src.start, items}}; remapPk(null);
   syncPlanFix(planCtx());
   const w=activeW();
   if(w){ w.plan=src.plan || `Повтор ${fmtDM(src.start)}`; w.planDay=src.planDay||null; }
@@ -3921,6 +3925,7 @@ function skipSet(i){
 async function closePlan(){
   if(DB.active.wId && !await ask('Убрать программу с экрана? Тренировка продолжится, но подсказки и автоподстановка по программе пропадут.','Убрать')) return;
   const adj=smartReview(planCtx(), activeW()).filter(a=>!a.info);
+  remapPk(null); devPrompt=null;
   DB.active.plan=null; save(); renderPlan();
   toast('Программа скрыта — тренировка продолжается'+(adj.length?' · рабочий 1ПМ: '+adj.map(a=>{ const e=exById(a.exId); return (e?e.name:'?')+' '+fmtNum(a.from)+'→'+fmtNum(a.to); }).join(', '):''), null, null, adj.length?5000:null);
 }
@@ -3988,11 +3993,11 @@ function devFor(rec, pi, k, left){
 function devHtml(ex){
   const d=devPrompt; if(!d || d.exId!==ex.id || !planCtx()) return '';
   const L=(w,r,rx)=>`${w!=null?wTxt(w,ex.id):'—'}×${r?fmtNum(r)+(rx?'–'+fmtNum(rx):''):'—'}`;
-  const n=`${d.left} ${plural(d.left,'подход','подхода','подходов')}`;
+  const n=d.left===1 ? 'Остался 1 подход' : `Оставшиеся ${d.left} ${plural(d.left,'подход','подхода','подходов')}`;
   const b=(w,r,lbl,cls)=>`<button type="button" class="dev-btn${cls||''}" data-act="dev-set"${w!=null?` data-w="${w}"`:''}${r?` data-r="${r}"`:''}>${lbl}</button>`;
-  if(d.up!=null) return `<div class="dev-row"><span class="dev-txt"><b>${L(d.w,d.r)}</b> — запас есть. Оставшиеся ${n}:</span>
+  if(d.up!=null) return `<div class="dev-row"><span class="dev-txt"><b>${L(d.w,d.r)}</b> — запас есть. ${n}:</span>
     ${b(d.up, d.pr, L(d.up, d.pr, d.prx), ' yes')}${b(d.w, d.r, L(d.w, d.r))}<button type="button" class="dev-btn" data-act="dev-no">По плану</button></div>`;
-  return `<div class="dev-row"><span class="dev-txt">Сделал <b>${L(d.w,d.r)}</b> вместо ${L(d.pw,d.pr,d.prx)}. Оставшиеся ${n} — так же?</span>
+  return `<div class="dev-row"><span class="dev-txt">Сделал <b>${L(d.w,d.r)}</b> вместо ${L(d.pw,d.pr,d.prx)}. ${n} — так же?</span>
     ${b(d.w, d.r, 'Да', ' yes')}<button type="button" class="dev-btn" data-act="dev-no">Нет</button></div>`;
 }
 // пункты на сегодня для правки: копия дня (создаётся при первой правке), у повтора — его пункты
@@ -4022,6 +4027,27 @@ function devSet(w, r){
   afterPlanEdit(d.exId, 'Оставшиеся подходы — '+(w!=null?wTxt(w,d.exId)+'×':'')+(r||'—'));
 }
 function devNo(){ devPrompt=null; renderLastHint(); }
+
+/* Пункт плана, на котором делается подход: нажатый чип, иначе зелёная точка (следующий подход этого
+   упражнения). Тип не совпал (точка на разминке, а подход рабочий) — первый незакрытый пункт того же типа.
+   Запоминается в записи (r.pk): подход засчитывается туда, где ты был, а не в пункт с ближайшим весом. */
+function planTarget(exId, rec){
+  const x=planCtx(); if(!x) return -1;
+  const items=x.d.items, st=planStatus(x);
+  const hasTest=items.some(it=>it.test && !it.warm && it.exId===exId);
+  const t=rec.warm ? 'warm' : (rec.t1 && hasTest) ? 'test' : 'work';
+  const ok=k=>{ const it=items[k]; return it && (it.exId===exId || it.swFrom===exId) && (it.warm?'warm':it.test?'test':'work')===t && st[k].done<st[k].need; };
+  const sel=chipSel && chipSel.exId===exId && chipSel.src==='plan' ? chipSel.k : -1;
+  if(sel>=0 && ok(sel)) return sel;
+  const nk=planNextIdx(x, st, exId);
+  if(nk>=0 && ok(nk)) return nk;
+  return items.findIndex((it,k)=>ok(k));
+}
+// номера пунктов поменялись (правка плана) — у подходов этой тренировки тоже
+function remapPk(map){
+  const w=DB.active.wId; if(!w) return;
+  DB.records.forEach(r=>{ if(r.wId===w && r.pk!=null){ if(map && map[r.pk]!=null) r.pk=map[r.pk]; else delete r.pk; } });
+}
 
 /* ---- окно «План» ---- */
 let peCtx=null;
@@ -4134,6 +4160,7 @@ function peSave(to){
   const res=applyRows(list, E, rows);
   // пропущенные подходы — к новым номерам пунктов
   if(pl.skip){ const sk={}; Object.keys(pl.skip).forEach(i=>{ if(res.map[i]!=null) sk[res.map[i]]=pl.skip[i]; }); pl.skip=sk; }
+  remapPk(res.map);
   if(pl.tmp) pl.tmp.items=res.out; else pl.items=res.out;
   if(to==='prog' && !pl.tmp){
     const day=findDay(pl.dayId);
@@ -4154,6 +4181,7 @@ function peReset(){
   for(let i=src.length;i<have;i++) rows.push({occ:i, del:true});
   const res=applyRows(pl.items, E, rows);
   if(pl.skip){ const sk={}; Object.keys(pl.skip).forEach(i=>{ if(res.map[i]!=null) sk[res.map[i]]=pl.skip[i]; }); pl.skip=sk; }
+  remapPk(res.map);
   pl.items=res.out;
   peCtx=null; closeModal();
   afterPlanEdit(P.exId, 'План — как в программе');
