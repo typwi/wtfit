@@ -2052,8 +2052,8 @@ function openOrmEdit(exIdOrName, back, keep){
   const inputs = !ex || ormManOpen || (mode==='test' && man);
   const hist=[];
   if(ex){
-    DB.records.forEach(r=>{ if(r.exId===ex.id && isTestRec(r)) hist.push({v:e1rm(loadOf(r),Math.round(r.reps)), txt:'тест '+setLabel(r), ts:r.ts}); });
-    (ex.tmh||[]).forEach(h=>hist.push({v:h.v, txt:h.why||'задан', ts:h.ts}));
+    DB.records.forEach(r=>{ if(r.exId===ex.id && isTestRec(r)) hist.push({v:e1rm(loadOf(r),Math.round(r.reps)), txt:'тест '+setLabel(r), ts:r.ts, rid:r.id}); });
+    (ex.tmh||[]).forEach((h,i)=>hist.push({v:h.v, txt:h.why||'задан', ts:h.ts, hi:i}));
     hist.sort((a,b)=>b.ts-a.ts);
   }
   const seg=(act,cur,opts)=>`<div class="seg orm-seg">${opts.map(([v,l])=>`<button type="button" class="${cur===v?'active':''}" data-act="${act}" data-id="${ex.id}" data-v="${v}">${l}</button>`).join('')}</div>`;
@@ -2074,9 +2074,11 @@ function openOrmEdit(exIdOrName, back, keep){
       </div>
       <div class="orm-preview" id="ormPrev" data-ex="${ex?ex.id:''}">Вес и максимум повторов с ним (точнее — до 8)</div>
       <button class="btn ok big" data-act="orm-save" data-name="${esc(name)}">${I('save')}Сохранить 1ПМ</button>`
-      : (ex && mode==='smart' ? `<button class="btn ghost big" data-act="orm-man-open" data-id="${ex.id}">${I('edit')}Изменить вручную</button>` : '')}
+      : ''}
     ${ex?`<button type="button" class="orm-step-row" data-act="orm-step" data-id="${ex.id}"><span>Шаг веса</span><b>${fmtNum(exStep(ex.id))} кг</b>${I('chev','sm')}</button>`:''}
-    ${hist.length?`<div class="section-head"><span>История</span></div><div class="card list-card">${hist.slice(0,6).map(h=>`<div class="rec-row"><div class="rec-main"><div class="rec-name">${fmtNum(round(h.v,1))} кг</div><div class="rec-desc">${esc(h.txt)}</div></div><div class="rec-side">${h.ts?fmtDate(h.ts):''}</div></div>`).join('')}</div>`:''}`);
+    ${hist.length?`<div class="section-head"><span>История</span><span class="muted">ошибся — убери запись</span></div><div class="card list-card">${hist.map(h=>`<div class="rec-row"${h.rid?` data-act="rec-edit" data-id="${h.rid}"`:''}>
+      <div class="rec-main"><div class="rec-name">${fmtNum(round(h.v,1))} кг</div><div class="rec-desc">${esc(h.txt)} · ${h.ts?fmtDate(h.ts):''}</div></div>
+      ${h.hi!=null?`<button type="button" class="pe-del" data-act="tmh-del" data-id="${ex.id}" data-i="${h.hi}" aria-label="Убрать">${I('trash','sm')}</button>`:`<div class="chev">${I('chev')}</div>`}</div>`).join('')}</div>`:''}`);
   const wi=$('#ormW'); if(wi && (back || ormManOpen) && !w.v) wi.focus();
 }
 function pctItemsOf(exId){ const a=[]; forEachItem(it=>{ if(it.exId===exId && it.pct) a.push(it); }); return a; }
@@ -2096,7 +2098,20 @@ function setOrmMan(exId, v){
   openOrmEdit(exId, ormEditBack, true);
   if(curView==='record'){ renderPlan(); }
 }
-function ormManShow(exId){ ormManOpen=true; openOrmEdit(exId, ormEditBack, true); }
+/* Убрать запись из истории 1ПМ (ошибся при вводе). Это был текущий рабочий 1ПМ — им становится
+   предыдущая запись истории, а если её нет — 1ПМ снова по тестам и записям. Тесты убираются через саму запись. */
+async function tmhDel(exId, i){
+  const ex=exById(exId), h=ex && ex.tmh && ex.tmh[i]; if(!h) return;
+  if(!await ask(`Убрать из истории: ${fmtNum(round(h.v,1))} кг · ${esc(h.why||'')} · ${fmtDate(h.ts)}?`,'Убрать',true)) return;
+  const wasCur = ex.tm && ex.tm.ts===h.ts && Math.abs(ex.tm.v-h.v)<0.06;
+  ex.tmh.splice(i,1);
+  if(!ex.tmh.length) delete ex.tmh;
+  if(wasCur){ const last=ex.tmh && ex.tmh[ex.tmh.length-1]; if(last) ex.tm=Object.assign({}, last); else { delete ex.tm; delete ex.man; } }
+  refreezeEx(exId); save();
+  openOrmEdit(exId, ormEditBack, true);
+  if(curView==='record') renderPlan(); else refresh();
+  toast(`Рабочий 1ПМ ≈ ${fmtNum(round(workOrm(exId),1))} кг`, null, null, 2200, 'check');
+}
 // вернуться к 1ПМ по тестам и записям
 function tmReset(exId){
   const ex=exById(exId); if(!ex) return;
@@ -4331,15 +4346,13 @@ function openSwap(exId){
   if(!o || !cur) return;
   swapCtx={orig, cur:exId, scope:'day'};
   const subs=(o.subs||[]).map(exById).filter(e=>e && e.id!==exId && e.id!==orig);
-  const row=e=>{ const v=workOrm(e.id); return `<div class="rec-row" data-act="swap-pick" data-id="${e.id}"><div class="rec-main"><div class="rec-name">${esc(e.name)}</div>
-    <div class="rec-desc">${v?'1ПМ ≈ '+fmtNum(round(v,1))+' кг':'1ПМ нет — вес подберёте сами'}</div></div><div class="chev">${I('chev')}</div></div>`; };
-  openModal(`<div class="sheet-head"><h2>Заменить упражнение</h2>${closeX()}</div>
-    <p class="muted">Вместо «${esc(o.name)}»${exId!==orig?` (сейчас — «${esc(cur.name)}»)`:''} — все его пункты сегодняшней тренировки, вместе с разминкой. Проценты считаются от 1ПМ нового упражнения, уже сделанные подходы засчитываются.</p>
+  openModal(`<div class="sheet-head"><h2>Заменить «${esc(cur.name)}»</h2>${closeX()}</div>
     ${x.tmp?'':`<div class="seg swap-scope"><button type="button" class="active" data-act="swap-scope" data-v="day">Только сегодня</button><button type="button" data-act="swap-scope" data-v="prog">Во всей программе</button></div>`}
-    ${exId!==orig?`<button class="btn ghost big" data-act="swap-pick" data-id="${orig}">${I('swap')}Вернуть «${esc(o.name)}»</button>`:''}
-    ${subs.length?`<div class="section-head"><span>Уже заменяли на</span></div><div class="card list-card sheet-list">${subs.map(row).join('')}</div>`:''}
-    <label for="swapQ">${subs.length?'Другое упражнение':'Упражнение'}</label>
+    ${exId!==orig?`<button class="btn ghost big" data-act="swap-back">${I('swap')}Вернуть «${esc(o.name)}»</button>`:''}
+    <label for="swapQ">Упражнение</label>
     <div class="autocomplete"><input id="swapQ" data-exs="1" placeholder="Начните вводить…" autocomplete="off" autocorrect="off" autocapitalize="sentences" enterkeyhint="done"><div class="suggest exs-suggest"></div></div>
+    ${subs.length?`<div class="swap-subs">${subs.map(e=>`<button type="button" class="swap-sub" data-act="swap-sel" data-name="${esc(e.name)}">${esc(e.name)}</button>`).join('')}</div>`:''}
+    <div id="swapWBox" class="hidden"><label for="swapW">Вес</label><select id="swapW"></select></div>
     <button class="btn big" data-act="swap-go">${I('exch')}Заменить</button>`);
 }
 function swapScope(v, el){
@@ -4347,26 +4360,99 @@ function swapScope(v, el){
   swapCtx.scope=v;
   $$('.swap-scope button').forEach(b=>b.classList.toggle('active', b===el));
 }
+/* Веса для замены. База — веса пунктов, как они сейчас в плане (нагрузка с учётом своего веса), и самый
+   тяжёлый рабочий из них (top). Варианты:
+     orm  — та же доля 1ПМ: нагрузка / 1ПМ заменяемого × 1ПМ нового (у заменяемого нет 1ПМ — по расчёту от top);
+     r:id — как в прошлый раз: самый тяжёлый подход той тренировки = top, остальные пункты в той же пропорции;
+     self — вес подбираешь сам (пункты в кг — без веса, «%» остаются от 1ПМ нового). */
+function swapBase(){
+  const S=swapCtx, x=planCtx(); if(!S || !x) return null;
+  const kC=exBw(S.cur), bC=kC ? bodyNow()*kC : 0;
+  const ks=x.d.items.map((it,k)=>k).filter(k=>x.d.items[k].exId===S.cur);
+  const L={}; let top=0, topR=0;
+  if(!ks.length) return null;
+  ks.forEach(k=>{ const pi=planItem(x,k); if(pi && pi.weight!=null){ L[k]=pi.weight+bC; if(!pi.warm && L[k]>top){ top=L[k]; topR=pi.reps||0; } } });
+  if(!top) ks.forEach(k=>{ if(L[k]>top){ top=L[k]; topR=x.d.items[k].reps||0; } });
+  let ormC=workOrm(S.cur); if(!ormC && top) ormC=e1rm(top, topR||8);
+  return {x, ks, L, top, ormC};
+}
+function swapOptions(newId){
+  const B=swapBase(); if(!B) return [];
+  const opts=[], ormN=workOrm(newId), kN=exBw(newId), bN=kN ? bodyNow()*kN : 0;
+  const w=L=>roundStep(L-bN, newId);
+  if(ormN && B.ormC && B.top) opts.push({v:'orm', t:`По 1ПМ · ≈ ${wTxt(w(B.top/B.ormC*ormN), newId)} кг`});
+  if(B.top) exSessions(newId).slice(0,3).forEach(ss=>{
+    let best=null; ss.recs.forEach(r=>{ if(!r.warm && r.weight!=null && r.reps && (!best || loadOf(r)>loadOf(best))) best=r; });
+    if(best) opts.push({v:'r'+best.id, t:`Как ${fmtDM(best.ts)} · ${setLabel(best)}`});
+  });
+  opts.push({v:'self', t:'Вес подберу сам'});
+  return opts;
+}
+// новый вес по нагрузке L (база — текущий план); null — без веса
+function swapConv(mode, newId, B){
+  const ormN=workOrm(newId), kN=exBw(newId), bN=kN ? bodyNow()*kN : 0;
+  if(mode==='orm' && ormN && B.ormC) return L=>roundStep(L/B.ormC*ormN-bN, newId);
+  if(mode && mode[0]==='r'){ const r=DB.records.find(q=>q.id===+mode.slice(1)); if(r && B.top){ const T=loadOf(r); return L=>roundStep(T*L/B.top-bN, newId); } }
+  return ()=>null;
+}
+function swapRenderW(){
+  const box=$('#swapWBox'), sel=$('#swapW'), nm=cleanName($('#swapQ') && $('#swapQ').value); if(!box || !sel || !swapCtx) return;
+  const ex=nm && exByName(nm);
+  const opts = ex ? (ex.id===swapCtx.cur ? [] : swapOptions(ex.id)) : (nm ? [{v:'self', t:'Новое упражнение — вес подберу сам'}] : []);
+  box.classList.toggle('hidden', !opts.length);
+  sel.innerHTML=opts.map(o=>`<option value="${o.v}">${esc(o.t)}</option>`).join('');
+}
+document.addEventListener('input', e=>{ if(e.target.id==='swapQ') swapRenderW(); });
+function swapSel(name){ const i=$('#swapQ'); if(!i) return; i.value=name; markBad(i,false); swapRenderW(); }
 function swapGo(){
   const inp=$('#swapQ'), nm=cleanName(inp && inp.value);
   if(!nm){ markBad(inp,true); toast('Выберите упражнение'); return; }
-  applySwap(getOrCreateEx(nm).id);
+  const sel=$('#swapW');
+  applySwap(getOrCreateEx(nm).id, sel && sel.value || 'self');
 }
-function applySwap(newId){
+function applySwap(newId, mode){
   const S=swapCtx, x=planCtx(); if(!S || !x) return;
   const pl=DB.active.plan, o=exById(S.orig), n=exById(newId); if(!o || !n) return;
-  const prog = S.scope==='prog' && !x.tmp && newId!==S.orig;
+  // то же упражнение: «во всей программе» — закрепить сегодняшнюю замену в программе (веса — по 1ПМ)
+  const perm = newId===S.cur && S.cur!==S.orig && S.scope==='prog' && !x.tmp;
+  if(newId===S.cur && !perm){ closeModal(); return; }
+  if(perm) mode = (workOrm(newId) && workOrm(S.orig)) ? 'orm' : 'self';
+  const back=newId===S.orig, prog = S.scope==='prog' && !x.tmp && !back;
+  const B=(back || perm) ? null : swapBase(), conv=B ? swapConv(mode, newId, B) : null;
+  // план на сегодня: веса пунктов заменяемого — по выбранному варианту; «Вернуть» — исходные веса
+  const list=perm ? null : todayItems();
+  if(list) B ? B.ks.forEach(k=>{ const it=list[k]; if(!it) return;
+      if(mode==='orm' && it.pct) return;                           // «%» и так от 1ПМ нового
+      if(mode==='self' && it.pct) return;
+      if(B.L[k]==null) return;
+      it.pct=null; it.weight=conv(B.L[k]);
+    })
+    : list.forEach(it=>{ if(it.exId===S.orig && it.o){ it.pct=it.o.pct; it.weight=it.o.weight; } });
   if(prog){
-    x.p.folders.forEach(f=>f.days.forEach(d=>d.items.forEach(it=>{ if(it.exId===S.orig) it.exId=newId; })));
+    // во всей программе: пункты в кг — тем же способом (от нагрузки пункта), «%» остаются — они от 1ПМ нового
+    // база — веса исходного упражнения в сегодняшнем дне программы
+    const kO=exBw(S.orig), bO=kO ? bodyNow()*kO : 0, day=findDay(pl.dayId), pit=day ? day.d.items.filter(it=>it.exId===S.orig) : [];
+    let ormO=workOrm(S.orig), topO=0, topR=8;
+    pit.forEach(it=>{ if(!it.pct && it.weight!=null && !it.warm && it.weight+bO>topO){ topO=it.weight+bO; topR=it.reps||8; } });
+    if(!ormO && topO) ormO=e1rm(topO, topR);
+    pit.forEach(it=>{ if(it.pct && ormO && !it.warm){ const v=pctWeight(S.orig, ormO, it.pct)+bO; if(v>topO) topO=v; } });
+    const ormN=workOrm(newId), kN=exBw(newId), bN=kN ? bodyNow()*kN : 0, rr=mode && mode[0]==='r' ? DB.records.find(q=>q.id===+mode.slice(1)) : null;
+    const convP = (mode==='orm' && ormO && ormN) ? L=>roundStep(L/ormO*ormN-bN, newId)
+                : (rr && topO) ? L=>roundStep(loadOf(rr)*L/topO-bN, newId) : ()=>null;
+    x.p.folders.forEach(f=>f.days.forEach(d=>d.items.forEach(it=>{
+      if(it.exId!==S.orig) return;
+      it.exId=newId;
+      if(!it.pct && it.weight!=null) it.weight=convP(it.weight+bO);
+    })));
     if(Array.isArray(pl.items)) pl.items.forEach(it=>{ if(it.exId===S.orig) it.exId=newId; });
     if(pl.sw) delete pl.sw[S.orig];
   } else {
     pl.sw=pl.sw||{};
-    if(newId===S.orig) delete pl.sw[S.orig]; else pl.sw[S.orig]=newId;
+    if(back) delete pl.sw[S.orig]; else pl.sw[S.orig]=newId;
   }
-  if(newId!==S.orig) o.subs=[newId].concat((o.subs||[]).filter(i=>i!==newId)).slice(0,5);
+  if(!back) o.subs=[newId].concat((o.subs||[]).filter(i=>i!==newId)).slice(0,5);
   const x2=planCtx(); if(x2) syncPlanFix(x2);
-  swapCtx=null; chipSel=null;
+  swapCtx=null; chipSel=null; devPrompt=null;
   save(); closeModal();
   // в форме было заменяемое упражнение — сразу следующий подход нового
   const fe=exByName(exInput.value);
@@ -4375,7 +4461,7 @@ function applySwap(newId){
     if(k>=0) fillFromPlan(k, true); else { exInput.value=n.name; lastExKey=normKey(n.name); }
   }
   renderRecord(); renderPlan();
-  toast(newId===S.orig ? `Снова «${o.name}»` : `«${o.name}» → «${n.name}»${prog?' во всей программе':' на сегодня'}${workOrm(newId)?'':' · вес подберите сами'}`, null, null, 3000, 'exch');
+  toast(back ? `Снова «${o.name}»` : `«${S.cur===S.orig?o.name:exById(S.cur).name}» → «${n.name}»${prog?' во всей программе':' на сегодня'}${mode==='self'?' · вес подберите сами':''}`, null, null, 3000, 'exch');
 }
 
 /* ================== ДОБАВИТЬ ПРОШЕДШУЮ ТРЕНИРОВКУ В ПРОГРАММУ ================== */
@@ -5503,13 +5589,14 @@ document.addEventListener('click', e=>{
     case 'dev-set':          devSet(el.dataset.w!=null?+el.dataset.w:null, el.dataset.r?+el.dataset.r:null); break;
     case 'dev-no':           devNo(); break;
     case 'swap-scope':       swapScope(el.dataset.v, el); break;
-    case 'swap-pick':        applySwap(id); break;
+    case 'swap-back':        applySwap(swapCtx && swapCtx.orig); break;
+    case 'swap-sel':         swapSel(el.dataset.name); break;
     case 'swap-go':          swapGo(); break;
     case 'orm-man':          setOrmMan(id, el.dataset.v); break;
     case 'pct-pick':         openPctPick(); break;
     case 'pct-set':          pctSet(+el.dataset.w); break;
     case 'pct-own':          pctOwn(); break;
-    case 'orm-man-open':     ormManShow(id); break;
+    case 'tmh-del':          tmhDel(id, +el.dataset.i); break;
     case 'orm-step':         openStepSheet(id); break;
     case 'tm-reset':         tmReset(id); break;
     case 'orm-quick':        ormQuick(id); break;

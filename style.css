@@ -901,3 +901,8 @@ button.hs.hs-skip{display:inline-flex;align-items:center;gap:2px;background:tran
 .oc-legend span{display:flex;align-items:center;gap:4px}
 .oc-legend i{width:8px;height:8px;border-radius:50%;display:inline-block}
 .oc-legend i.oc-fact-dot{background:rgba(158,196,255,.45)}
+.swap-subs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+.swap-sub{background:var(--card2);border:1px solid var(--border);color:var(--txt);border-radius:14px;padding:6px 12px;font-family:inherit;font-size:13px;cursor:pointer}
+.swap-sub:active{opacity:.6}
+#swapWBox.hidden{display:none}
+#swapW{width:100%}
