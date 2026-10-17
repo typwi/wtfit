@@ -906,3 +906,14 @@ button.hs.hs-skip{display:inline-flex;align-items:center;gap:2px;background:tran
 .swap-sub:active{opacity:.6}
 #swapWBox.hidden{display:none}
 #swapW{width:100%}
+
+/* ===== свёрнутая разминка ===== */
+.warm-sum{display:flex;align-items:center;gap:6px;padding:7px 0 7px 14px;font-size:13px;color:var(--muted);cursor:pointer}
+.ex-block .warm-sum{padding-left:0}
+.warm-sum-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.warm-sum-t .i{width:13px;height:13px;color:var(--ok);vertical-align:-2px}
+.warm-sum > .i{flex:none;width:14px;height:14px;transition:transform .15s}
+.warm-sum:active{opacity:.6}
+.warm-list{display:none}
+.wopen > .warm-list{display:block}
+.wopen > .warm-sum > .i{transform:rotate(180deg)}

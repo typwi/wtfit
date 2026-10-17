@@ -2710,7 +2710,9 @@ function openWorkout(id){
     const tt=rs.reduce((a,r)=>a+ton(r),0);
     return `<div class="ex-block">
       <div class="ex-block-title"><span>${esc(ex?ex.name:'?')}</span><span class="muted">${tt?fmtTon(tt):''}</span></div>
-      ${rs.map(r=>`<div class="set-line" data-act="rec-edit" data-id="${r.id}" data-w="${w.id}"><span class="num">${fmtTime(r.ts)}</span>${r.warm?WARM_TAG:''}${esc(describe(r))||'—'}${gapHtml(gaps,r)}${r.notes?`<span class="note">«${esc(r.notes)}»</span>`:''}</div>`).join('')}
+      ${(()=>{ const line=r=>`<div class="set-line" data-act="rec-edit" data-id="${r.id}" data-w="${w.id}"><span class="num">${fmtTime(r.ts)}</span>${r.warm?WARM_TAG:''}${esc(describe(r))||'—'}${gapHtml(gaps,r)}${r.notes?`<span class="note">«${esc(r.notes)}»</span>`:''}</div>`;
+        const wr=rs.filter(r=>r.warm);
+        return wr.length ? warmSumHtml(expandSets(wr).map(setLabel))+`<div class="warm-list">${wr.map(line).join('')}</div>`+rs.filter(r=>!r.warm).map(line).join('') : rs.map(line).join(''); })()}
     </div>`;
   }).join('');
   if(!recs.length) html+='<div class="empty">Записей пока нет</div>';
@@ -3492,6 +3494,12 @@ const grpHead = (n, name, cls='', extra='', tail='') => `<div class="pg-head${cl
 // строка подхода внутри группы: разминка · вес × повторы × подходы «заметка»
 const grpDesc = (it, shown) => `<div class="rec-main"><div class="rec-desc pg-desc">${it.warm?WARM_TAG:''}${planDesc(shown||it)}${it.notes?` <span class="note">«${esc(it.notes)}»</span>`:''}</div></div>`;
 
+/* Разминка при просмотре свёрнута в одну строку «разминка · 3 подхода · 40×10, 30×8 …» — нажать, чтобы раскрыть. */
+function warmSumHtml(labels, done){
+  return `<div class="warm-sum" data-act="wlist-toggle">${WARM_TAG}<span class="warm-sum-t">${labels.length} ${plural(labels.length,'подход','подхода','подходов')}${done?' '+I('check','sm'):''} · ${esc(labels.join(', '))}</span>${I('down','sm')}</div>`;
+}
+function warmToggle(el){ const b=el.closest('.ex-block, .pg'); if(b) b.classList.toggle('wopen'); }
+
 /* ---- тренировка программы ---- */
 function openDay(id){
   const x=findDay(id);
@@ -3501,8 +3509,10 @@ function openDay(id){
   const list = d.items.length
     ? `<div class="card list-card sheet-list">${dayRuns(d.items).map((g,gi)=>{
         const e=exById(d.items[g.idx[0]].exId);
+        const wi=g.idx.filter(i=>d.items[i].warm), row=i=>`<div class="rec-row pg-row"><span class="plan-mark">${i+1}</span>${grpDesc(d.items[i])}</div>`;
         return `<div class="pg" data-act="day-edit" data-id="${d.id}">${grpHead(gi+1, e?e.name:'?')}
-          ${g.idx.map(i=>`<div class="rec-row pg-row"><span class="plan-mark">${i+1}</span>${grpDesc(d.items[i])}</div>`).join('')}</div>`;
+          ${wi.length ? warmSumHtml(wi.map(i=>setLabel(rItem(d.items[i]))))+`<div class="warm-list">${wi.map(row).join('')}</div>` : wi.map(row).join('')}
+          ${g.idx.filter(i=>!d.items[i].warm).map(row).join('')}</div>`;
       }).join('')}</div>`
     : '<div class="empty" style="padding:20px 10px">Упражнений пока нет — нажмите «Изменить»</div>';
   openModal(`<div class="sheet-head"><h2>${esc(d.name)}</h2>${closeX()}</div>
@@ -3891,11 +3901,14 @@ function renderPlan(){
     ${planFolded ? '' : dayRuns(x.d.items).map((g,gi)=>{ const e=exById(x.d.items[g.idx[0]].exId);
       const allOk=g.idx.every(i=>st[i].ok);
       const from=x.d.items[g.idx[0]].swFrom, fe=from && exById(from);
+      const wi=g.idx.filter(i=>x.d.items[i].warm), wDone=wi.length>0 && wi.every(i=>st[i].ok) && !wi.includes(next);
       return `<div class="pg pg-plan">${grpHead(gi+1, (e?e.name:'?')+(fe?' · вместо «'+fe.name+'»':''), allOk?' done':'', '', !e?'':`<button type="button" class="pg-swap" data-act="plan-edit" data-id="${e.id}" aria-label="Изменить план">${I('edit','sm')}</button>${allOk?'':`<button type="button" class="pg-swap" data-act="ex-swap" data-id="${e.id}" aria-label="Заменить упражнение">${I('exch','sm')}</button>`}`)}
-        ${g.idx.map(i=>{ const it=x.d.items[i], s=st[i], part=!s.ok && s.done>0;
-        return `<div class="plan-row pg-row${s.ok?' done':''}${i===next?' next':''}${it.warm?' warm':''}" data-act="plan-fill" data-i="${i}">
-          <span class="plan-mark${part?' part':''}">${s.ok?I('check'):part?`${s.done}/${s.need}`:(i+1)}</span>
-          ${grpDesc(it, planItem(x,i))}</div>`; }).join('')}</div>`; }).join('')}
+        ${(()=>{ const row=i=>{ const it=x.d.items[i], s=st[i], part=!s.ok && s.done>0;
+          return `<div class="plan-row pg-row${s.ok?' done':''}${i===next?' next':''}${it.warm?' warm':''}" data-act="plan-fill" data-i="${i}">
+            <span class="plan-mark${part?' part':''}">${s.ok?I('check'):part?`${s.done}/${s.need}`:(i+1)}</span>
+            ${grpDesc(it, planItem(x,i))}</div>`; };
+          return wDone ? warmSumHtml(wi.map(i=>setLabel(planItem(x,i))), true)+`<div class="warm-list">${wi.map(row).join('')}</div>`+g.idx.filter(i=>!x.d.items[i].warm).map(row).join('')
+                       : g.idx.map(row).join(''); })()}</div>`; }).join('')}
     ${planFolded && next>=0 ? (()=>{ const it=planItem(x,next), e=exById(it.exId), s2=st[next];
       return `<div class="plan-next-row" data-act="plan-next" data-i="${next}" data-ex="${esc(normKey(e?e.name:''))}">
         <div class="rec-main"><div class="plan-next-lbl">Далее${s2.need>1?` · подход ${s2.done+1} из ${s2.need}`:''}</div>
@@ -5597,6 +5610,7 @@ document.addEventListener('click', e=>{
     case 'pct-set':          pctSet(+el.dataset.w); break;
     case 'pct-own':          pctOwn(); break;
     case 'tmh-del':          tmhDel(id, +el.dataset.i); break;
+    case 'wlist-toggle':     warmToggle(el); break;
     case 'orm-step':         openStepSheet(id); break;
     case 'tm-reset':         tmReset(id); break;
     case 'orm-quick':        ormQuick(id); break;
