@@ -3923,24 +3923,41 @@ function renderPlan(){
   </div>`;
   renderPlanNext();
 }
+/* Выбор тренировки по программе: программы свёрнуты (нажать — раскрыть), сверху поиск по программам,
+   папкам и тренировкам — при поиске совпадения раскрыты. */
 function openPlanPicker(){
-  let html=`<div class="sheet-head"><h2>Тренировка по программе</h2>${closeX()}</div>`;
-  DB.programs.forEach(p=>{
-    if(!p.folders.some(f=>f.days.length)) return;
-    html+=`<div class="pick-prog">${I('clip')}${esc(p.name)}</div><div class="card list-card sheet-list">`;
-    p.folders.forEach(f=>{
-      if(!f.days.length) return;
-      html+=`<div class="list-day">${esc(f.name)}</div>`;
-      f.days.forEach(d=>{
-        html+=`<div class="rec-row" data-act="day-open" data-id="${d.id}">
-          <div class="rec-main"><div class="rec-name">${esc(d.name)}</div><div class="rec-desc">${d.items.length} упр.</div></div>
-          <div class="chev">${I('chev')}</div></div>`;
-      });
-    });
-    html+='</div>';
-  });
-  openModal(html);
+  const progs=DB.programs.filter(p=>p.folders.some(f=>f.days.length));
+  openModal(`<div class="sheet-head"><h2>Тренировка по программе</h2>${closeX()}</div>
+    ${progs.length>1 || progs.some(p=>p.folders.length>1) ? `<input id="pickQ" class="search" type="search" placeholder="Поиск: программа, неделя, тренировка" autocomplete="off" autocorrect="off">` : ''}
+    <div id="pickList"></div>`);
+  renderPickList();
 }
+function renderPickList(){
+  const box=$('#pickList'); if(!box) return;
+  const q=normKey(($('#pickQ')||{}).value||''), words=q.split(/\s+/).filter(Boolean);
+  const progs=DB.programs.filter(p=>p.folders.some(f=>f.days.length));
+  const hit=(...t)=>{ const s=normKey(t.join(' ')); return words.every(w=>s.includes(w)); };
+  const single=progs.length===1;
+  let html='';
+  progs.forEach(p=>{
+    let inner='', n=0;
+    p.folders.forEach(f=>{
+      // слова ищутся в папке и тренировке; название программы — только целиком (иначе «низ» из «Верх / Низ» нашёл бы всё)
+      const days=f.days.filter(d=>!words.length || hit(f.name, d.name) || hit(p.name));
+      if(!days.length) return;
+      n+=days.length;
+      inner+=`<div class="list-day">${esc(f.name)}</div>`+days.map(d=>`<div class="rec-row" data-act="day-open" data-id="${d.id}">
+        <div class="rec-main"><div class="rec-name">${esc(d.name)}</div><div class="rec-desc">${[...new Set(d.items.map(it=>{ const e=exById(it.exId); return e?e.name:'?'; }))].join(', ')||'пусто'}</div></div>
+        <div class="chev">${I('chev')}</div></div>`).join('');
+    });
+    if(!n) return;
+    const open = words.length>0;
+    html+=`<div class="pick-grp${open?' open':''}"><button type="button" class="pick-prog" data-act="pick-toggle">${I('clip')}<span>${esc(p.name)}</span><span class="muted pick-n">${n}</span>${I('down','sm')}</button>
+      <div class="card list-card sheet-list pick-body">${inner}</div></div>`;
+  });
+  box.innerHTML = html || '<div class="empty" style="padding:20px 10px">Ничего не найдено</div>';
+}
+document.addEventListener('input', e=>{ if(e.target.id==='pickQ') renderPickList(); });
 function startPlan(dayId){
   const x=findDay(dayId); if(!x) return;
   if(!DB.active.wId) startWorkout(true);
@@ -5736,6 +5753,7 @@ document.addEventListener('click', e=>{
     case 'tmh-del':          tmhDel(id, +el.dataset.i); break;
     case 'wlist-toggle':     warmToggle(el); break;
     case 'more-toggle':      moreToggle(el); break;
+    case 'pick-toggle':      el.closest('.pick-grp').classList.toggle('open'); break;
     case 'prog-list-menu':   openProgListMenu(); break;
     case 'orm-step':         openStepSheet(id); break;
     case 'tm-reset':         tmReset(id); break;

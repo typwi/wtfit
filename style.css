@@ -935,3 +935,13 @@ button.hs.hs-skip{display:inline-flex;align-items:center;gap:2px;background:tran
 .view.enter-r{animation:enterR .22s ease-out}
 .view.enter-l{animation:enterL .22s ease-out}
 .ex-block{overflow:hidden}
+
+/* ===== выбор тренировки по программе ===== */
+#pickQ{margin:6px 0 4px}
+.pick-grp .pick-prog{width:100%;background:none;border:none;color:var(--txt);font-family:inherit;font-size:15px;cursor:pointer;padding:6px 2px}
+.pick-grp .pick-prog span:first-of-type{flex:1;text-align:left}
+.pick-n{font-size:12px;font-weight:600}
+.pick-grp .pick-prog > .i:last-child{transition:transform .15s}
+.pick-grp.open .pick-prog > .i:last-child{transform:rotate(180deg)}
+.pick-body{display:none}
+.pick-grp.open .pick-body{display:block}
