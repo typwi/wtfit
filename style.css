@@ -821,3 +821,22 @@ button.hs.hs-skip{display:inline-flex;align-items:center;gap:2px;background:tran
 .cloud-steps b{color:var(--txt)}
 .cloud-btn small.cloud-status{color:inherit}
 .cloud-btn small.cloud-status.err{color:#ffd0d8}
+
+/* ===== замена упражнения ===== */
+.swap-btn{flex:none;display:flex;align-items:center;justify-content:center;margin-left:auto;margin-right:2px;background:none;border:1px solid var(--border);
+  color:var(--muted);border-radius:14px;width:34px;height:26px;padding:0;cursor:pointer}
+.swap-btn .i{width:16px;height:16px}
+.swap-btn:active{opacity:.6}
+.pg-swap{flex:none;margin-left:auto;background:none;border:none;color:var(--muted);padding:2px 4px;cursor:pointer;display:flex;align-items:center}
+.pg-swap .i{width:16px;height:16px}
+.swap-scope{margin-top:4px}
+
+/* ===== рабочий 1ПМ ===== */
+.orm-seg{margin-bottom:4px}
+.orm-note{font-size:12px;line-height:1.4;margin:4px 2px 6px}
+.adj-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border)}
+.adj-row:first-of-type{border-top:none}
+.adj-main{flex:1;min-width:0;line-height:1.35}
+.adj-undo{flex:none;background:none;border:1px solid var(--border);color:var(--accent);border-radius:8px;padding:4px 9px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.adj-st{flex:none;font-size:12px;color:var(--muted)}
+.adj-row.undone .adj-main{color:var(--muted);text-decoration:line-through}
