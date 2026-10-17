@@ -111,7 +111,7 @@ function fromInputDT(s){
 */
 function emptyDB(){
   return {
-    v:4, ormV:3, exercises:[], records:[], workouts:[], programs:[],
+    v:4, ormV:4, exercises:[], records:[], workouts:[], programs:[],
     measures:[], mkinds:[],
     seq:{ex:0, rec:0, w:0, prog:0, m:0},
     active:{wId:null, restEnd:null, restTotal:0, plan:null},
@@ -140,7 +140,7 @@ function load(){
 function normalize(d){
   const base=emptyDB();
   const out={
-    v:4, ormV:3,
+    v:4, ormV:4,
     exercises: (Array.isArray(d.exercises)?d.exercises:[])
       .filter(e=>e && e.name!=null && cleanName(e.name))
       .map(e=>{ const o={id:+e.id, name:cleanName(e.name)};
@@ -155,7 +155,7 @@ function normalize(d){
         if(e.tm && num(e.tm.v)>0) o.tm={v:round(num(e.tm.v),2), ts:+e.tm.ts||Date.now(), why:String(e.tm.why||'')};
         if(Array.isArray(e.tmh)) o.tmh=e.tmh.filter(h=>h && num(h.v)>0).slice(-30).map(h=>({v:round(num(h.v),2), ts:+h.ts||0, why:String(h.why||'')}));
         if(e.mode==='smart' || e.mode==='test') o.mode=e.mode;
-        if(e.miss==='soft' || e.miss==='keep') o.miss=e.miss;
+        if(e.man) o.man=true;
         if(Array.isArray(e.subs)){ const sb=e.subs.map(Number).filter(Boolean).slice(0,5); if(sb.length) o.subs=sb; }
         return o; }),
     records: (Array.isArray(d.records)?d.records:[])
@@ -195,6 +195,7 @@ function normalize(d){
   if(!out.active.wId){ out.active.restEnd=null; out.active.restTotal=0; }
   if(!(+d.ormV>=2)) migrateOrm(out);
   if(!(+d.ormV>=3)) migrateTm(out);
+  if(!(+d.ormV>=4)) migrateMan(out);
   out.exercises.forEach(e=>{ delete e.orm; delete e.ormHist; });
   const pl=out.active.plan;
   let pday=null;
@@ -203,14 +204,21 @@ function normalize(d){
   // замены упражнений на сегодня: {исходное: замена}
   const exIds=new Set(out.exercises.map(e=>e.id));
   const swN=o=>{ const r={}; if(o && typeof o==='object') Object.keys(o).forEach(k=>{ const v=+o[k]; if(+k && v && v!==+k && exIds.has(v)) r[+k]=v; }); return r; };
-  // правки пунктов на сегодня: {номер пункта: {pct, weight, reps, rmax, sets}}
-  const ovN=o=>{ const r={}; if(o && typeof o==='object') Object.keys(o).forEach(k=>{ const v=o[k]; if(!(+k>=0) || !v || typeof v!=='object') return;
-    const x={}; ['pct','weight','reps','rmax','sets'].forEach(f=>{ if(f in v) x[f]=v[f]===null ? null : num(v[f]); }); if(Object.keys(x).length) r[+k]=x; }); return r; };
-  if(pday) out.active.plan={dayId:pday.id, fx:normFix(pl, pday), skip:skipN(pl.skip), sw:swN(pl.sw), ov:ovN(pl.ov)};
+  // план на сегодня, изменённый на ходу: копия пунктов дня; o — исходные значения пункта (для умного пересчёта)
+  const oN=o=>o && typeof o==='object' ? {pct:num(o.pct), weight:num(o.weight), reps:num(o.reps), rmax:num(o.rmax)} : null;
+  const itemsN=arr=>{ const src=Array.isArray(arr)?arr.filter(it=>it && it.exId!=null):[]; return normItems(src).map((it,i)=>{ const o=oN(src[i].o); if(o) it.o=o; return it; }); };
+  if(pday){
+    out.active.plan={dayId:pday.id, fx:normFix(pl, pday), skip:skipN(pl.skip), sw:swN(pl.sw)};
+    if(Array.isArray(pl.items)) out.active.plan.items=itemsN(pl.items);
+    else if(pl.ov && typeof pl.ov==='object' && Object.keys(pl.ov).length){        // правки v52 → копия плана
+      out.active.plan.items=pday.items.map((it,k)=>{ const c=Object.assign({}, it, {o:{pct:it.pct, weight:it.weight, reps:it.reps, rmax:it.rmax}}), v=pl.ov[k];
+        if(v) ['pct','weight','reps','rmax','sets'].forEach(f=>{ if(f in v) c[f]=v[f]===null?null:num(v[f]); }); return c; });
+    }
+  }
   else if(out.active.wId && pl && pl.tmp && Array.isArray(pl.tmp.items)){
     // «Повторить тренировку»: план без программы, пункты хранятся прямо в нём
     const tmp={name:cleanName(pl.tmp.name)||'Тренировка', date:+pl.tmp.date||0, items:normItems(pl.tmp.items)};
-    out.active.plan={dayId:0, tmp, fx:normFix(pl, tmp), skip:skipN(pl.skip), sw:swN(pl.sw), ov:ovN(pl.ov)};
+    out.active.plan={dayId:0, tmp, fx:normFix(pl, tmp), skip:skipN(pl.skip), sw:swN(pl.sw)};
   }
   else out.active.plan=null;
   out.workouts.forEach(w=>{
@@ -269,6 +277,16 @@ function migrateTm(o){
   });
   items.forEach(it=>{ it.src='c'; rangeFromNotes(it); });
 }
+/* ormV 4: у режима «по тесту» есть ручной 1ПМ, который тест не меняет (ex.man). Рабочий 1ПМ, заданный
+   вручную позже последнего теста, у упражнений с тестом в программе становится таким ручным — значение не меняется. */
+function migrateMan(o){
+  const tests=new Set(); o.programs.forEach(p=>p.folders.forEach(f=>f.days.forEach(d=>d.items.forEach(it=>{ if(it.test) tests.add(it.exId); }))));
+  o.exercises.forEach(e=>{
+    if(!e.tm || !tests.has(e.id) || (e.mode && e.mode!=='test') || !/^(ручн|вручн)/.test(e.tm.why||'')) return;
+    let last=0; o.records.forEach(r=>{ if(r.exId===e.id && r.t1 && !r.warm && r.ts>last) last=r.ts; });
+    if(e.tm.ts>last) e.man=true;
+  });
+}
 // «8–12 повт · запас 2» в начале заметки при повторах из этого диапазона → пункт «8–12 повт», заметка «запас 2»
 function rangeFromNotes(it){
   const m=String(it.notes||'').match(/^\s*(\d+)\s*[–—-]\s*(\d+)\s*повт\.?\s*(?:·\s*)?/);
@@ -317,6 +335,7 @@ function parseLocalTs(s){
 }
 
 function save(){
+  testExCache=null;
   try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); return true; }
   catch(e){ console.error(e); toast('Не удалось сохранить данные — память недоступна или переполнена', null, null, 4000, 'alert'); return false; }
 }
@@ -552,17 +571,23 @@ function curOrm(exId){ return curOrmInfo(exId).v; }
    «по тесту» — меняется только тестом и вручную. По умолчанию «по тесту» — у упражнений с тестом в программе. */
 function workOrmInfo(exId, skipW){
   const e=exById(exId), c=curOrmInfo(exId, skipW), t=e && e.tm;
+  if(exMode(exId)==='test'){
+    // по тесту: последний тест (и более тяжёлый подход после него); ручной — свой, тест его не меняет
+    if(e && e.man && t && t.v>0) return {v:t.v, kind:'tm', tm:t, cur:c, man:true};
+    return {v:c.v, kind:c.kind, cur:c};
+  }
   if(t && t.v>0 && !(c.test && c.test.ts>t.ts)) return {v:t.v, kind:'tm', tm:t, cur:c};
   return {v:c.v, kind:c.kind, cur:c};
 }
 function workOrm(exId){ return workOrmInfo(exId).v; }
 function ormBase(it){ return workOrm(it.exId); }
+// упражнения с тестом в программах — кешируется до следующего сохранения (считается для каждого пункта при отрисовке)
+let testExCache=null;
 function exMode(exId){
   const e=exById(exId); if(e && e.mode) return e.mode;
-  let t=false; forEachItem(it=>{ if(it.exId===exId && it.test) t=true; });
-  return t ? 'test' : 'smart';
+  if(!testExCache){ testExCache=new Set(); forEachItem(it=>{ if(it.test) testExCache.add(it.exId); }); }
+  return testExCache.has(exId) ? 'test' : 'smart';
 }
-function exMiss(exId){ const e=exById(exId); return (e && e.miss) || 'soft'; }
 // задать рабочий 1ПМ; возвращает прежний (для «Отменить»)
 function setTm(exId, v, why){
   const e=exById(exId); if(!e || !(v>0)) return null;
@@ -1140,6 +1165,40 @@ function renderWStep(){
   const lab=el.parentElement; if(lab && lab.firstChild && lab.firstChild.nodeType===3) lab.firstChild.nodeValue = 'Вес (кг)';
   const b=bw ? bodyNow() : 0;
   el.textContent = (st!==2.5 ? ` · шаг ${fmtNum(st)}` : '') + (bw ? (b ? ` · соб.вес ${fmtNum(b)}` : ' · нет соб.веса') : '');
+  // % от рабочего 1ПМ: сколько это для веса в поле; нажать — выбрать вес по проценту
+  const pb=$('#wPctBtn'); if(!pb) return;
+  const orm=ex ? workOrm(ex.id) : 0, w=num($('#mWeight').value);
+  if(!orm){ pb.classList.add('hidden'); return; }
+  const L=w!=null ? w+(bw&&b?b*bw:0) : null;
+  pb.classList.remove('hidden');
+  pb.textContent = L>0 ? Math.round(L/orm*100)+'% 1ПМ' : '% 1ПМ';
+}
+/* Вес по проценту от рабочего 1ПМ — и без программы: проценты с весами, нажал — вес в поле. */
+function openPctPick(){
+  const ex=exByName(exInput.value); if(!ex) return;
+  const orm=workOrm(ex.id); if(!orm) return;
+  const kb=exBw(ex.id), b=kb ? bodyNow() : 0, cur=num($('#mWeight').value);
+  const chip=p=>{ const w=pctWeight(ex.id, orm, p); return `<button type="button" class="pct-chip" data-act="pct-set" data-w="${w}"><b>${p}%</b><span>${wTxt(w,ex.id)} кг</span></button>`; };
+  openModal(`<div class="sheet-head"><h2>Вес от 1ПМ · ${esc(ex.name)}</h2>${closeX()}</div>
+    <button type="button" class="pct-orm" data-act="orm-quick" data-id="${ex.id}">Рабочий 1ПМ <b>≈ ${fmtNum(round(orm,1))} кг</b>${I('chev','sm')}</button>
+    ${cur!=null && cur+(b*kb)>0 ? `<p class="muted" style="margin:8px 2px 0">${wTxt(cur,ex.id)} кг в поле — это <b>${Math.round((cur+b*kb)/orm*100)}%</b> 1ПМ.</p>` : ''}
+    <div class="pct-grid">${[50,55,60,65,70,75,80,85,90,95].map(chip).join('')}</div>
+    <div class="pct-own"><input id="pctOwn" inputmode="decimal" placeholder="Свой %" autocomplete="off"><span id="pctOwnW" class="muted"></span>
+      <button type="button" class="btn" data-act="pct-own">Подставить</button></div>`);
+}
+document.addEventListener('input', e=>{
+  if(e.target.id!=='pctOwn') return;
+  const ex=exByName(exInput.value), orm=ex ? workOrm(ex.id) : 0, p=num(e.target.value), o=$('#pctOwnW');
+  if(o) o.textContent = (orm && p>0 && p<=200) ? '≈ '+wTxt(pctWeight(ex.id, orm, p), ex.id)+' кг' : '';
+});
+function pctSet(w){
+  if(w==null || !isFinite(w)) return;
+  closeModal(); setVal('mWeight', w); markBad($('#mWeight'), false); renderLastHint();
+}
+function pctOwn(){
+  const ex=exByName(exInput.value), orm=ex ? workOrm(ex.id) : 0, p=num($('#pctOwn').value);
+  if(!(orm && p>0 && p<=200)){ markBad($('#pctOwn'), true); toast('Процент — от 1 до 200'); return; }
+  pctSet(pctWeight(ex.id, orm, p));
 }
 function renderLastHint(){
   renderWStep();
@@ -1295,8 +1354,7 @@ function saveRecord(){
     if(k<0) px.d.items.forEach((it,i)=>{ if(it.exId===ex.id && !!it.warm===!!rec.warm && st[i].done>0) k=i; });
     if(k>=0 && px.d.items[k].rest!=null) restSec=px.d.items[k].rest;
     devPrompt=null;
-    if(k>=0){ const st2=planStatus(px), left=st2[k].need-st2[k].done, pi=planItem(px,k);
-      if(left>0 && setDeviates(rec, pi)) devPrompt={k, exId:ex.id, w:rec.weight, r:rec.reps, left, pw:pi.weight, pr:pi.reps, prx:pi.rmax}; }
+    if(k>=0){ const st2=planStatus(px), left=st2[k].need-st2[k].done; if(left>0) devPrompt=devFor(rec, planItem(px,k), k, left); }
   }
   if(arMode==='fixed') restSec=lastRest;
   if(arMode!=='off' && DB.active.wId && (reps || weight) && restSec>0){ startRest(restSec, true); autoStarted=true; }
@@ -1338,7 +1396,7 @@ async function stopWorkout(){
   if(!ok || !DB.active.wId) return;
   if(DB.active.restEnd) cancelRest();
   const w=activeW();
-  smartReview(planCtx(true), w);           // умный 1ПМ (по исходному плану) — до того, как план закроется
+  smartReview(planCtx(), w);               // умный 1ПМ (по исходному плану) — до того, как план закроется
   devPrompt=null;
   DB.active.wId=null;
   DB.active.plan=null;
@@ -1979,14 +2037,17 @@ function openOrmList(back){
         <div class="m-val">${w.v?fmtNum(round(w.v,1))+' кг':'—'}</div><div class="chev">${I('chev')}</div></div>`; }).join('')}</div>`
       :'<div class="empty">Упражнений пока нет</div>'}`);
 }
-let ormEditBack=null;
-function openOrmEdit(exIdOrName, back){
+let ormEditBack=null, ormManOpen=false;
+/* Экран 1ПМ: значение, режим (умный / по тесту), у «по тесту» — от теста или ручной (тест его не меняет),
+   ручной ввод (вес × повторы), шаг веса, история. keep — перерисовка того же окна (ручной ввод остаётся раскрытым). */
+function openOrmEdit(exIdOrName, back, keep){
   ormEditBack=back||null;
+  if(!keep) ormManOpen=false;
   const ex = typeof exIdOrName==='number' ? exById(exIdOrName) : exByName(exIdOrName);
   const name = ex ? ex.name : cleanName(exIdOrName);
   const w = ex ? workOrmInfo(ex.id) : {v:0, kind:null, cur:{v:0, rec:null, kind:null}}, c=w.cur;
-  const mode = ex ? exMode(ex.id) : 'smart', miss = ex ? exMiss(ex.id) : 'soft';
-  // история: тесты (записи с тумблером «Тест») и изменения рабочего 1ПМ
+  const mode = ex ? exMode(ex.id) : 'smart', man = !!(ex && ex.man && ex.tm);
+  const inputs = !ex || ormManOpen || (mode==='test' && man);
   const hist=[];
   if(ex){
     DB.records.forEach(r=>{ if(r.exId===ex.id && isTestRec(r)) hist.push({v:e1rm(loadOf(r),Math.round(r.reps)), txt:'тест '+setLabel(r), ts:r.ts}); });
@@ -1994,45 +2055,46 @@ function openOrmEdit(exIdOrName, back){
     hist.sort((a,b)=>b.ts-a.ts);
   }
   const seg=(act,cur,opts)=>`<div class="seg orm-seg">${opts.map(([v,l])=>`<button type="button" class="${cur===v?'active':''}" data-act="${act}" data-id="${ex.id}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  const note=t=>`<p class="muted orm-note">${t}</p>`;
   openModal(`<div class="sheet-head"><h2>1ПМ · ${esc(name)}</h2><button class="icon-btn" data-act="orm-cancel" aria-label="Закрыть">${I('x')}</button></div>
     <div class="orm-cur">
       <div class="orm-cur-lbl">Рабочий 1ПМ</div>
       <div class="orm-cur-v">${w.v?'≈ '+fmtNum(round(w.v,1))+' кг':'—'}</div>
-      <div class="orm-cur-src">${esc(w.v?workOrmText(w):'нет данных — сделайте подход или тест, или задайте ниже')}</div>
+      <div class="orm-cur-src">${esc(w.v?workOrmText(w):'нет данных — сделайте подход или тест, или задайте вручную')}</div>
     </div>
-    ${ex && w.kind==='tm' && c.v && Math.abs(c.v-w.v)>=0.5 ? `<button class="btn ghost big" data-act="tm-reset" data-id="${ex.id}">${I('swap')}По записям ≈ ${fmtNum(round(c.v,1))} кг — взять его</button>` : ''}
-    ${ex ? `<label>Расчёт</label>${seg('orm-mode', mode, [['smart','Умный'],['test','По тесту']])}
-      <p class="muted orm-note">${mode==='smart'
-        ? 'После каждой тренировки по программе: снизил вес — 1ПМ пересчитывается по факту; недобрал повторы — по настройке ниже; во всех подходах дошёл до верха диапазона («8–10») — вес растёт на шаг. Тест задаёт 1ПМ сразу.'
-        : 'Меняется только тестом (подход с «Тест 1ПМ»), более тяжёлым подходом после него или вручную. Для жима и приседа с неделями теста.'}</p>
-      ${mode==='smart' ? `<label>Недобор повторов</label>${seg('orm-miss', miss, [['soft','Чуть понизить'],['keep','Оставить']])}
-        <p class="muted orm-note">«Чуть понизить» — на половину недобора (обычно 1–3%). Один недобранный повтор в последнем подходе не считается.</p>` : ''}` : ''}
-    <div class="section-head"><span>Задать вручную</span></div>
-    <p class="muted" style="margin:0 2px 2px">Вес и максимум повторов с ним (точнее — до 8).</p>
-    <div class="grid2">
-      <div><label for="ormW">Вес, кг</label><input id="ormW" inputmode="decimal" value="" placeholder="${c.rec?esc(inVal(c.rec.weight)):'0'}"></div>
-      <div><label for="ormR">Повторы на максимум</label><input id="ormR" inputmode="numeric" value="" placeholder="${c.rec?Math.min(Math.round(c.rec.reps),10):'5'}"></div>
-    </div>
-    <div class="orm-preview" id="ormPrev" data-ex="${ex?ex.id:''}">1ПМ появится после ввода</div>
-    <div class="grid2" style="margin-top:16px">
-      <button class="btn ghost" data-act="orm-cancel">Отмена</button>
-      <button class="btn ok" data-act="orm-save" data-name="${esc(name)}">${I('save')}Сохранить</button>
-    </div>
-    ${ex?`<label>Шаг веса, кг</label>${stepSeg(ex)}<p class="muted orm-note">На этот шаг округляются веса «%» и растёт вес в умном режиме.</p>`:''}
-    ${hist.length?`<div class="section-head"><span>История 1ПМ</span></div><div class="card list-card">${hist.slice(0,10).map(h=>`<div class="rec-row"><div class="rec-main"><div class="rec-name">${fmtNum(round(h.v,1))} кг</div><div class="rec-desc">${esc(h.txt)}</div></div><div class="rec-side">${h.ts?fmtDate(h.ts):''}</div></div>`).join('')}</div>`:''}`);
-  const wi=$('#ormW'); if(wi && back && !w.v) wi.focus();
+    ${ex ? seg('orm-mode', mode, [['smart','Умный'],['test','По тесту']]) : ''}
+    ${ex && mode==='smart' ? note(`Подстраивается после каждой тренировки по программе: снизил вес или недобрал повторы — понижается, во всех подходах дошёл до верха диапазона («8–10») — вес +${fmtNum(exStep(ex.id))} кг. Тест задаёт сразу.`) : ''}
+    ${ex && mode==='test' ? seg('orm-man', (man||ormManOpen)?'man':'test', [['test','От теста'],['man','Ручной']])
+        + note(man||ormManOpen ? 'Свой 1ПМ — тест его не меняет.' : 'Последний тест (подход с «Тест 1ПМ») или более тяжёлый подход после него.') : ''}
+    ${inputs ? `<div class="grid2">
+        <div><label for="ormW">Вес, кг</label><input id="ormW" inputmode="decimal" value="" placeholder="${c.rec?esc(inVal(c.rec.weight)):'0'}"></div>
+        <div><label for="ormR">Повторы на максимум</label><input id="ormR" inputmode="numeric" value="" placeholder="${c.rec?Math.min(Math.round(c.rec.reps),10):'5'}"></div>
+      </div>
+      <div class="orm-preview" id="ormPrev" data-ex="${ex?ex.id:''}">Вес и максимум повторов с ним (точнее — до 8)</div>
+      <button class="btn ok big" data-act="orm-save" data-name="${esc(name)}">${I('save')}Сохранить 1ПМ</button>`
+      : (ex && mode==='smart' ? `<button class="btn ghost big" data-act="orm-man-open" data-id="${ex.id}">${I('edit')}Изменить вручную</button>` : '')}
+    ${ex?`<button type="button" class="orm-step-row" data-act="orm-step" data-id="${ex.id}"><span>Шаг веса</span><b>${fmtNum(exStep(ex.id))} кг</b>${I('chev','sm')}</button>`:''}
+    ${hist.length?`<div class="section-head"><span>История</span></div><div class="card list-card">${hist.slice(0,6).map(h=>`<div class="rec-row"><div class="rec-main"><div class="rec-name">${fmtNum(round(h.v,1))} кг</div><div class="rec-desc">${esc(h.txt)}</div></div><div class="rec-side">${h.ts?fmtDate(h.ts):''}</div></div>`).join('')}</div>`:''}`);
+  const wi=$('#ormW'); if(wi && (back || ormManOpen) && !w.v) wi.focus();
 }
 function pctItemsOf(exId){ const a=[]; forEachItem(it=>{ if(it.exId===exId && it.pct) a.push(it); }); return a; }
 function setOrmMode(exId, v){
   const ex=exById(exId); if(!ex) return;
-  ex.mode=v; save();
+  ex.mode=v; refreezeEx(exId); save();
   openOrmEdit(exId, ormEditBack);
+  if(curView==='record'){ renderPlan(); }
 }
-function setOrmMiss(exId, v){
+// по тесту: «От теста» — ручной выключается; «Ручной» — свой 1ПМ (если уже задан — сразу он, иначе ввести)
+function setOrmMan(exId, v){
   const ex=exById(exId); if(!ex) return;
-  ex.miss=v; save();
-  openOrmEdit(exId, ormEditBack);
+  if(v==='test'){ delete ex.man; ormManOpen=false; }
+  else if(ex.tm){ ex.man=true; ormManOpen=false; }
+  else ormManOpen=true;
+  refreezeEx(exId); save();
+  openOrmEdit(exId, ormEditBack, true);
+  if(curView==='record'){ renderPlan(); }
 }
+function ormManShow(exId){ ormManOpen=true; openOrmEdit(exId, ormEditBack, true); }
 // вернуться к 1ПМ по тестам и записям
 function tmReset(exId){
   const ex=exById(exId); if(!ex) return;
@@ -2061,7 +2123,7 @@ function ormPreview(){
   const k=exBw(+el.dataset.ex), b=k ? bodyNow() : 0, wi=num($('#ormW')&&$('#ormW').value), r=num($('#ormR')&&$('#ormR').value);
   const w=(wi||0)+b*k;
   if(w>0 && r && r>=1 && r<=50) el.innerHTML=`1ПМ ≈ <b>${fmtNum(round(e1rm(w,Math.round(r)),1))} кг</b>${k&&b?` · с соб.весом ${fmtNum(b)}`:''}${r>12?' · много повторов — расчёт приблизительный':r>8?' · больше 8 повторов — расчёт грубее':''}`;
-  else el.textContent = r>50 ? 'Слишком много повторов' : '1ПМ появится после ввода';
+  else el.textContent = r>50 ? 'Слишком много повторов' : 'Вес и максимум повторов с ним (точнее — до 8)';
 }
 document.addEventListener('input', e=>{ if(e.target.id==='ormW'||e.target.id==='ormR') ormPreview(); });
 function ormSave(name){
@@ -2072,6 +2134,8 @@ function ormSave(name){
   if(badW||badR){ toast('Вес — больше 0, повторы — целое число от 1 до 50', null, null, 3500, 'alert'); return; }
   const ex=getOrCreateEx(name), v=e1rm(w+b*k, r);
   setTm(ex.id, v, 'вручную '+wTxt(w,ex.id)+'×'+fmtNum(r));
+  if(exMode(ex.id)==='test') ex.man=true;           // по тесту: ручной — тест его не меняет
+  ormManOpen=false;
   refreezeEx(ex.id);
   save();
   toast(`Рабочий 1ПМ ${ex.name}: ≈ ${fmtNum(round(v,1))} кг`, null, null, 3000, 'check');
@@ -3653,27 +3717,23 @@ function saveDay(){
   day.name=name; day.items=final;
   dayDraft=null;
   // правка дня, который идёт сейчас: у нетронутых пунктов веса остаются, новые и изменённые считаются заново
-  if(DB.active.plan && DB.active.plan.dayId===day.id){ DB.active.plan.skip={}; DB.active.plan.ov={}; const x=planCtx(); if(x) syncPlanFix(x); }
+  if(DB.active.plan && DB.active.plan.dayId===day.id){ DB.active.plan.skip={}; delete DB.active.plan.items; const x=planCtx(); if(x) syncPlanFix(x); }
   save(); refresh(); openDay(day.id);
   toast('Сохранено', null, null, null, 'check');
   checkOrmNeeded(day.items);
 }
 
 /* ================== ТРЕНИРОВКА ПО ПРОГРАММЕ (экран «Запись») ================== */
-/* noOv — без правок на сегодня (умный пересчёт сравнивает с исходным планом: решил сделать 80% вместо 70%
-   или снизил вес — это сигнал для рабочего 1ПМ). */
-function planCtx(noOv){
+function planCtx(){
   const pl=DB.active.plan;
   if(!pl || !DB.active.wId) return null;
   let x = pl.tmp ? {p:{name:'Повтор'}, f:{name:pl.tmp.date?fmtDate(pl.tmp.date):''}, d:{id:0, name:pl.tmp.name, items:pl.tmp.items}, tmp:true} : findDay(pl.dayId);
+  // план меняли на ходу — пункты из копии на сегодня (программа не тронута)
+  if(x && !pl.tmp && Array.isArray(pl.items)) x=Object.assign({}, x, {d:Object.assign({}, x.d, {items:pl.items})});
   // замена упражнения на сегодня: пункты исходного идут под заменой (swFrom — какое было)
   const sw=pl.sw;
   if(x && sw && Object.keys(sw).length)
     x=Object.assign({}, x, {d:Object.assign({}, x.d, {items:x.d.items.map(it=>sw[it.exId] ? Object.assign({}, it, {exId:sw[it.exId], swFrom:it.exId}) : it)})});
-  // правки пунктов на сегодня (окно «План» или «оставшиеся подходы — так же»)
-  const ov=!noOv && pl.ov;
-  if(x && ov && Object.keys(ov).length)
-    x=Object.assign({}, x, {d:Object.assign({}, x.d, {items:x.d.items.map((it,k)=>ov[k] ? Object.assign({}, it, ov[k], {ovr:true}) : it)})});
   return x;
 }
 /* Выполнение плана по подходам. Каждый записанный подход (по времени) засчитывается в пункт того же
@@ -3860,7 +3920,7 @@ function skipSet(i){
 }
 async function closePlan(){
   if(DB.active.wId && !await ask('Убрать программу с экрана? Тренировка продолжится, но подсказки и автоподстановка по программе пропадут.','Убрать')) return;
-  const adj=smartReview(planCtx(true), activeW()).filter(a=>!a.info);
+  const adj=smartReview(planCtx(), activeW()).filter(a=>!a.info);
   DB.active.plan=null; save(); renderPlan();
   toast('Программа скрыта — тренировка продолжается'+(adj.length?' · рабочий 1ПМ: '+adj.map(a=>{ const e=exById(a.exId); return (e?e.name:'?')+' '+fmtNum(a.from)+'→'+fmtNum(a.to); }).join(', '):''), null, null, adj.length?5000:null);
 }
@@ -3897,10 +3957,15 @@ function fillFromPlan(i, noScroll){
 }
 
 /* ================== ПЛАН НА ХОДУ ==================
-   Подход сделан не так, как в пункте (другой вес или повторы вне плана/диапазона), а подходы пункта ещё
-   остались — под упражнением вопрос «оставшиеся — так же?». «Да» — правка пункта на сегодня (вес в кг,
-   повторы), автоподстановка дальше даёт её. Окно «План» (✎) — поменять пункты упражнения на ходу: % или кг,
-   повторы, диапазон, подходы — на сегодня или сразу в программе. Правки на сегодня лежат в DB.active.plan.ov. */
+   Изменения плана на сегодня живут в копии пунктов дня (DB.active.plan.items), программа не меняется.
+   У скопированных пунктов o — исходные значения: умный пересчёт сравнивает подходы с ними (решил сделать
+   тяжелее или легче — это тоже сигнал для рабочего 1ПМ).
+   • После подхода не по плану, если у пункта остались подходы, — вопрос под упражнением:
+     сделал заметно больше (на верхней границе повторов +2 и больше, вес не меньше плана) — предложить вес
+     побольше: половина разницы до расчётного веса на плановые повторы, не меньше шага («60×14 → 62,5×10»);
+     иначе — «оставшиеся так же?».
+   • Окно «План» (✎): пункты упражнения — % или кг, повторы, «до», подходы; удалить пункт, добавить подход;
+     применить на сегодня или сохранить и в программе. */
 let devPrompt=null;
 function setDeviates(r, pi){
   if(!pi) return false;
@@ -3909,109 +3974,189 @@ function setDeviates(r, pi){
   const lo=pi.reps, hi=pi.rmax||pi.reps;
   return !!(lo && r.reps && (r.reps<lo || r.reps>hi));
 }
+function devFor(rec, pi, k, left){
+  if(!pi) return null;
+  const lo=pi.reps, hi=pi.rmax||pi.reps, base={k, exId:rec.exId, w:rec.weight, r:rec.reps, left, pw:pi.weight, pr:lo, prx:pi.rmax};
+  if(lo && rec.reps>=hi+2 && rec.weight!=null && pi.weight!=null && rec.weight>=pi.weight-0.01){
+    const kb=exBw(rec.exId), body=kb ? (rec.bw||bodyNow()) : 0, La=loadOf(rec);
+    const exact=e1rm(La, rec.reps)/(1+lo/30) - body*kb, st=exStep(rec.exId);
+    const up=Math.max(rec.weight+st, Math.floor((rec.weight+(exact-rec.weight)/2)/st+1e-9)*st);
+    return Object.assign(base, {up:round(up,2)});
+  }
+  return setDeviates(rec, pi) ? base : null;
+}
 function devHtml(ex){
   const d=devPrompt; if(!d || d.exId!==ex.id || !planCtx()) return '';
-  const lbl=(w,r,rx)=>`${w!=null?wTxt(w,ex.id):'—'}×${r?fmtNum(r)+(rx?'–'+fmtNum(rx):''):'—'}`;
-  return `<div class="dev-row"><span class="dev-txt">Сделал <b>${lbl(d.w,d.r)}</b> вместо ${lbl(d.pw,d.pr,d.prx)}. Оставшиеся ${d.left} ${plural(d.left,'подход','подхода','подходов')} — так же?</span>
-    <button type="button" class="dev-btn yes" data-act="dev-yes">Да</button><button type="button" class="dev-btn" data-act="dev-no">Нет</button></div>`;
+  const L=(w,r,rx)=>`${w!=null?wTxt(w,ex.id):'—'}×${r?fmtNum(r)+(rx?'–'+fmtNum(rx):''):'—'}`;
+  const n=`${d.left} ${plural(d.left,'подход','подхода','подходов')}`;
+  const b=(w,r,lbl,cls)=>`<button type="button" class="dev-btn${cls||''}" data-act="dev-set"${w!=null?` data-w="${w}"`:''}${r?` data-r="${r}"`:''}>${lbl}</button>`;
+  if(d.up!=null) return `<div class="dev-row"><span class="dev-txt"><b>${L(d.w,d.r)}</b> — запас есть. Оставшиеся ${n}:</span>
+    ${b(d.up, d.pr, L(d.up, d.pr, d.prx), ' yes')}${b(d.w, d.r, L(d.w, d.r))}<button type="button" class="dev-btn" data-act="dev-no">По плану</button></div>`;
+  return `<div class="dev-row"><span class="dev-txt">Сделал <b>${L(d.w,d.r)}</b> вместо ${L(d.pw,d.pr,d.prx)}. Оставшиеся ${n} — так же?</span>
+    ${b(d.w, d.r, 'Да', ' yes')}<button type="button" class="dev-btn" data-act="dev-no">Нет</button></div>`;
 }
-function devYes(){
-  const d=devPrompt, pl=DB.active.plan; devPrompt=null;
-  if(!d || !pl) return;
-  const x=planCtx(), it=x && x.d.items[d.k]; if(!it) return;
-  const o=Object.assign({}, (pl.ov||{})[d.k]||{});
-  const pw=planItem(x,d.k).weight;
-  if(d.w!=null && (pw==null || Math.abs(d.w-pw)>0.01)){ o.pct=null; o.weight=d.w; }
-  if(d.r && (!it.reps || d.r<it.reps || d.r>(it.rmax||it.reps))){ o.reps=d.r; o.rmax=null; }
-  pl.ov=pl.ov||{}; pl.ov[d.k]=o;
-  syncPlanFix(planCtx()); save();
-  chipSel=null; clearForm(false); renderRecord(); autoFillNext(false); renderPlan();
-  toast('Оставшиеся подходы — '+(d.w!=null?wTxt(d.w,d.exId)+'×':'')+(d.r||'—'), null, null, 2200, 'check');
+// пункты на сегодня для правки: копия дня (создаётся при первой правке), у повтора — его пункты
+function todayItems(){
+  const pl=DB.active.plan; if(!pl) return null;
+  if(pl.tmp) return pl.tmp.items;
+  if(!Array.isArray(pl.items)){
+    const x=findDay(pl.dayId); if(!x) return null;
+    pl.items=x.d.items.map(it=>Object.assign({}, it, {o:{pct:it.pct||null, weight:it.weight==null?null:it.weight, reps:it.reps||null, rmax:it.rmax||null}}));
+  }
+  return pl.items;
+}
+// после правки плана: пересчитать фиксацию весов, обновить форму, карточку и подсказку
+function afterPlanEdit(exId, msg){
+  syncPlanFix(planCtx()); devPrompt=null; chipSel=null; save();
+  const fe=exByName(exInput.value);
+  if(fe && fe.id===exId){ clearForm(false); renderRecord(); autoFillNext(false); }
+  renderRecord(); renderPlan();
+  if(msg) toast(msg, null, null, 2200, 'check');
+}
+function devSet(w, r){
+  const d=devPrompt; devPrompt=null;
+  const x=planCtx(), pi=d && x && planItem(x, d.k), list=d && todayItems(), it=list && list[d.k];
+  if(!it || !pi) return;
+  if(w!=null && (pi.weight==null || Math.abs(w-pi.weight)>0.01)){ it.pct=null; it.weight=w; }
+  if(r && (!pi.reps || r<pi.reps || r>(pi.rmax||pi.reps))){ it.reps=r; it.rmax=null; }
+  afterPlanEdit(d.exId, 'Оставшиеся подходы — '+(w!=null?wTxt(w,d.exId)+'×':'')+(r||'—'));
 }
 function devNo(){ devPrompt=null; renderLastHint(); }
 
+/* ---- окно «План» ---- */
 let peCtx=null;
+function peRowHtml(it, k, done, need, isNew){
+  const pct=!!it.pct, base=peCtx ? workOrm(peCtx.exId) : 0;
+  const calc = pct ? (base ? (it.pct ? '≈ '+wTxt(pctWeight(peCtx.exId, base, it.pct), peCtx.exId)+' кг' : '') : 'нет 1ПМ') : '';
+  return `<div class="pe-row${it.warm?' warm':''}"${k!=null?` data-k="${k}"`:' data-new="1"'} data-done="${done||0}">
+    <div class="pe-head">${it.warm?WARM_TAG:''}${it.test?'<span class="test-tag">тест 1ПМ</span>':''}${isNew?'<span class="pe-new">новый</span>':''}
+      <span class="muted pe-done">${need?`сделано ${done} из ${need}`:''}</span>
+      <button type="button" class="pe-del" data-act="pe-del" aria-label="Убрать">${I('trash','sm')}</button></div>
+    <div class="pe-grid">
+      <label class="pi-l"><span class="pi-wl"><button type="button" class="pi-unit${pct?' pct':''}" data-act="pe-unit">${pct?'% 1ПМ':'кг'}</button></span><input class="pe-w" inputmode="decimal" value="${esc(inVal(pct?it.pct:it.weight))}" placeholder="—" autocomplete="off"><span class="pi-calc pe-calc">${esc(calc)}</span></label>
+      <label class="pi-l">Повт.<input class="pe-r" inputmode="numeric" value="${esc(inVal(it.reps))}" placeholder="—" autocomplete="off"></label>
+      <label class="pi-l">до<input class="pe-rx" inputmode="numeric" value="${esc(inVal(it.rmax))}" placeholder="—" autocomplete="off"></label>
+      <label class="pi-l">Подх.<input class="pe-s" inputmode="numeric" value="${esc(inVal(it.sets||1))}" placeholder="1" autocomplete="off"></label>
+    </div></div>`;
+}
+// пункты упражнения в плане отличаются от программы (есть что «вернуть»)
+function peDiffers(exId){
+  const pl=DB.active.plan; if(!pl || pl.tmp || !Array.isArray(pl.items)) return false;
+  const x=findDay(pl.dayId); if(!x) return false;
+  const E=peOrigEx(exId), strip=a=>JSON.stringify(a.filter(it=>it.exId===E).map(it=>[it.pct||0,it.weight||0,it.reps||0,it.rmax||0,it.sets||0,!!it.warm,!!it.test]));
+  return strip(pl.items)!==strip(x.d.items);
+}
+// упражнение пунктов в программе (до замены на сегодня)
+function peOrigEx(exId){ const sw=(DB.active.plan && DB.active.plan.sw)||{}; return +(Object.keys(sw).find(k=>sw[k]===exId)||exId); }
 function openPlanEdit(exId){
   const x=planCtx(); if(!x) return;
   const st=planStatus(x), ks=x.d.items.map((it,k)=>k).filter(k=>x.d.items[k].exId===exId);
   const ex=exById(exId); if(!ex || !ks.length) return;
-  const base=workOrm(exId), pl=DB.active.plan;
-  peCtx={exId, ks};
-  const row=k=>{ const it=x.d.items[k], s=st[k], pct=!!it.pct;
-    const calc = pct ? (base ? '≈ '+wTxt(pctWeight(exId, base, it.pct), exId)+' кг' : 'нет 1ПМ') : '';
-    return `<div class="pe-row${it.warm?' warm':''}" data-k="${k}">
-      <div class="pe-head"><span class="plan-mark">${k+1}</span>${it.warm?WARM_TAG:''}${it.test?'<span class="test-tag">тест 1ПМ</span>':''}<span class="muted pe-done">сделано ${s.done} из ${s.need}</span>${pl.ov&&pl.ov[k]?'<span class="pe-ov">изменён</span>':''}</div>
-      <div class="pi-grid pe-grid">
-        <label class="pi-l"><span class="pi-wl">Вес <button type="button" class="pi-unit${pct?' pct':''}" data-act="pe-unit" data-k="${k}">${pct?'% 1ПМ':'кг'}</button></span><input class="pe-w" inputmode="decimal" value="${esc(inVal(pct?it.pct:it.weight))}" placeholder="—" autocomplete="off"><span class="pi-calc pe-calc">${esc(calc)}</span></label>
-        <label class="pi-l">Повторы<input class="pe-r" inputmode="numeric" value="${esc(inVal(it.reps))}" placeholder="—" autocomplete="off"></label>
-        <label class="pi-l">Подходы<input class="pe-s" inputmode="numeric" value="${esc(inVal(it.sets))}" placeholder="—" autocomplete="off"></label>
-      </div>
-      ${it.warm?'':`<label class="pi-l pe-rx-l">Повторы до (диапазон)<input class="pe-rx" inputmode="numeric" value="${esc(inVal(it.rmax))}" placeholder="—" autocomplete="off"></label>`}
-    </div>`; };
-  const anyOv=ks.some(k=>pl.ov && pl.ov[k]);
+  peCtx={exId};
   openModal(`<div class="sheet-head"><h2>План · ${esc(ex.name)}</h2>${closeX()}</div>
-    <p class="muted">Меняй на ходу: % или кг, повторы, подходы. Рабочий 1ПМ после тренировки считается по исходному плану — решил сделать тяжелее или легче, это тоже учтётся.</p>
-    ${ks.map(row).join('')}
+    <div id="peRows">${ks.map(k=>peRowHtml(x.d.items[k], k, st[k].done, st[k].need)).join('')}</div>
+    <button type="button" class="btn ghost big" data-act="pe-add">${I('plus')}Добавить подход</button>
+    <p class="muted pe-note">«до» — верх диапазона повторов. Рабочий 1ПМ после тренировки сравнивается с исходным планом.</p>
     <button class="btn big" data-act="pe-save" data-to="day">${I('check')}Применить на сегодня</button>
     ${x.tmp?'':`<button class="btn ghost big" data-act="pe-save" data-to="prog">${I('save')}Сохранить и в программе</button>`}
-    ${anyOv?`<button class="btn ghost big" data-act="pe-reset">${I('swap')}Вернуть как в программе</button>`:''}`);
+    ${peDiffers(exId)?`<button class="btn ghost big" data-act="pe-reset">${I('swap')}Вернуть как в программе</button>`:''}`);
 }
-// % ↔ кг в окне «План»: значение пересчитывается от рабочего 1ПМ
-function peUnit(k){
-  const el=$(`.pe-row[data-k="${k}"]`), btn=el && el.querySelector('.pi-unit'); if(!el || !peCtx) return;
-  const exId=peCtx.exId, base=workOrm(exId), inp=el.querySelector('.pe-w'), v=num(inp.value), toPct=!btn.classList.contains('pct');
+function peUnit(el){
+  const row=el.closest('.pe-row'); if(!row || !peCtx) return;
+  const exId=peCtx.exId, base=workOrm(exId), inp=row.querySelector('.pe-w'), v=num(inp.value), toPct=!el.classList.contains('pct');
   if(toPct && !base){ toast('1ПМ для этого упражнения пока нет — оставьте вес в кг'); return; }
-  btn.classList.toggle('pct', toPct); btn.textContent=toPct?'% 1ПМ':'кг';
+  el.classList.toggle('pct', toPct); el.textContent=toPct?'% 1ПМ':'кг';
   if(v && base) inp.value=inVal(toPct ? Math.round((v+(exBw(exId)?bodyNow()*exBw(exId):0))/base*100) : pctWeight(exId, base, v));
-  peCalc(el);
+  peCalc(row);
 }
-function peCalc(el){
-  const c=el.querySelector('.pe-calc'), pct=el.querySelector('.pi-unit').classList.contains('pct'), v=num(el.querySelector('.pe-w').value);
-  if(!c || !peCtx) return;
-  const base=workOrm(peCtx.exId);
+function peCalc(row){
+  const c=row && row.querySelector('.pe-calc'); if(!c || !peCtx) return;
+  const pct=row.querySelector('.pi-unit').classList.contains('pct'), v=num(row.querySelector('.pe-w').value), base=workOrm(peCtx.exId);
   c.textContent = pct ? (base ? (v ? '≈ '+wTxt(pctWeight(peCtx.exId, base, v), peCtx.exId)+' кг' : '') : 'нет 1ПМ') : '';
 }
 document.addEventListener('input', e=>{ if(e.target.matches && e.target.matches('.pe-w')) peCalc(e.target.closest('.pe-row')); });
+// удалить пункт; если подходы по нему уже сделаны — оставить только сделанные
+function peDel(el){
+  const row=el.closest('.pe-row'); if(!row) return;
+  const done=+row.dataset.done||0;
+  if(done>0){ row.querySelector('.pe-s').value=done; toast(`Сделано ${done} — остальные подходы убраны`, null, null, 2000); return; }
+  row.classList.add('del');
+}
+function peAdd(){
+  const box=$('#peRows'); if(!box || !peCtx) return;
+  const rows=$$('#peRows .pe-row:not(.del)'), last=rows.filter(r=>!r.classList.contains('warm')).pop() || rows.pop();
+  const v=last ? peRead(last) : {pct:null, weight:null, reps:null, rmax:null, sets:1};
+  box.insertAdjacentHTML('beforeend', peRowHtml(Object.assign({}, v, {sets:1}), null, 0, 0, true));
+}
+function peRead(row){
+  const g=c=>row.querySelector(c).value, pct=row.querySelector('.pi-unit').classList.contains('pct'), w=num(g('.pe-w'));
+  return {pct:pct?w:null, weight:pct?null:w, reps:num(g('.pe-r')), rmax:num(g('.pe-rx'))||null, sets:num(g('.pe-s'))||1};
+}
+/* Применить строки окна к списку пунктов: строки упражнения E по порядку — к его пунктам по порядку,
+   удалённые убираются, новые встают после последнего пункта упражнения. Возвращает новый список и карту
+   старый номер → новый (для пропущенных подходов). */
+function applyRows(list, E, rows, base){
+  const out=[], map={}; let occ=-1, after=-1, tmpl=null;
+  list.forEach((it,i)=>{
+    if(it.exId!==E){ map[i]=out.length; out.push(it); return; }
+    occ++;
+    const row=rows.find(r=>r.occ===occ);
+    after=out.length;
+    if(row && row.del) return;
+    tmpl=it;
+    const n=row ? Object.assign({}, it, row.v, base?base(it, row):{}) : it;
+    map[i]=out.length; out.push(n); after=out.length;
+  });
+  rows.filter(r=>r.occ==null && !r.del).forEach(r=>{
+    const t=tmpl || {exId:E, notes:'', rest:null, time:null};
+    out.splice(after<0?out.length:after, 0, Object.assign({exId:E, time:null, notes:t.notes||'', rest:t.rest==null?null:t.rest, warm:false, test:false, src:'c'}, r.v));
+    after=(after<0?out.length:after)+1;
+  });
+  return {out, map};
+}
 function peSave(to){
   const P=peCtx, pl=DB.active.plan, x=planCtx(); if(!P || !pl || !x) return;
-  const raw=planCtx(true), day=(to==='prog' && !x.tmp) ? findDay(pl.dayId) : null;
-  const vals=[]; let bad=false;
-  P.ks.forEach(k=>{
-    const el=$(`.pe-row[data-k="${k}"]`); if(!el) return;
-    const g=c=>{ const i=el.querySelector(c); return i ? i.value : ''; };
-    const pct=el.querySelector('.pi-unit').classList.contains('pct');
-    const w=num(g('.pe-w')), r=num(g('.pe-r')), sN=num(g('.pe-s')), rx=num(g('.pe-rx'));
-    const bw=exBw(P.exId);
+  const E=peOrigEx(P.exId), bw=exBw(P.exId);
+  const ks=x.d.items.map((it,k)=>k).filter(k=>x.d.items[k].exId===P.exId);
+  const rows=[]; let bad=false;
+  $$('#peRows .pe-row').forEach(row=>{
+    const occ=row.dataset.k!=null ? ks.indexOf(+row.dataset.k) : null;
+    if(row.classList.contains('del')){ if(occ!=null) rows.push({occ, del:true}); return; }
+    const v=peRead(row), pct=v.pct!=null, w=pct?v.pct:v.weight;
     const bW = w!=null && (pct ? (w<=0 || w>200) : (w>LIMITS.weight || (w<0 && !bw)));
-    const bR = r!=null && (r<0 || r>LIMITS.reps), bS = sN!=null && (sN<1 || sN>100 || Math.round(sN)!==sN), bX = rx!=null && !(r && rx>r && rx<=LIMITS.reps);
-    [['.pe-w',bW],['.pe-r',bR],['.pe-s',bS],['.pe-rx',bX]].forEach(([c,b])=>{ const i=el.querySelector(c); if(i) markBad(i,b); });
+    const bR = v.reps!=null && (v.reps<0 || v.reps>LIMITS.reps), bS = !(v.sets>=1 && v.sets<=100 && Math.round(v.sets)===v.sets), bX = v.rmax!=null && !(v.reps && v.rmax>v.reps && v.rmax<=LIMITS.reps);
+    [['.pe-w',bW],['.pe-r',bR],['.pe-s',bS],['.pe-rx',bX]].forEach(([c,b])=>markBad(row.querySelector(c),b));
     if(bW||bR||bS||bX){ bad=true; return; }
-    vals.push({k, v:{pct:pct?w:null, weight:pct?null:w, reps:r, rmax:rx||null, sets:sN}});
+    rows.push({occ: occ<0?null:occ, v});
   });
   if(bad){ toast('Проверьте выделенные поля: % — до 200, подходы — целое от 1, «до» — больше повторов', null, null, 3500, 'alert'); return; }
-  pl.ov=pl.ov||{};
-  vals.forEach(({k,v})=>{
-    if(day){ const it=day.d.items[k]; if(it){ Object.assign(it, v); delete pl.ov[k]; } return; }
-    // на сегодня: храним только отличия от исходного пункта
-    const o=raw.d.items[k], d={};
-    Object.keys(v).forEach(f=>{ if((o[f]==null?null:o[f])!==(v[f]==null?null:v[f])) d[f]=v[f]; });
-    if(Object.keys(d).length) pl.ov[k]=d; else delete pl.ov[k];
-  });
-  syncPlanFix(planCtx()); peCtx=null; devPrompt=null;
-  save(); closeModal();
-  const fe=exByName(exInput.value);
-  if(fe && fe.id===P.exId){ chipSel=null; clearForm(false); renderRecord(); autoFillNext(false); }
-  renderRecord(); renderPlan();
-  toast(day ? 'План сохранён в программе' : 'План на сегодня изменён', null, null, 2200, 'check');
+  const list=todayItems(); if(!list) return;
+  const res=applyRows(list, E, rows);
+  // пропущенные подходы — к новым номерам пунктов
+  if(pl.skip){ const sk={}; Object.keys(pl.skip).forEach(i=>{ if(res.map[i]!=null) sk[res.map[i]]=pl.skip[i]; }); pl.skip=sk; }
+  if(pl.tmp) pl.tmp.items=res.out; else pl.items=res.out;
+  if(to==='prog' && !pl.tmp){
+    const day=findDay(pl.dayId);
+    if(day){
+      day.d.items=applyRows(day.d.items, E, rows).out.map(it=>{ const c=Object.assign({}, it); delete c.o; return c; });
+      // теперь это план программы — с ним и сравнивать
+      pl.items.forEach(it=>{ if(it.exId===E) it.o={pct:it.pct||null, weight:it.weight==null?null:it.weight, reps:it.reps||null, rmax:it.rmax||null}; });
+    }
+  }
+  peCtx=null; closeModal();
+  afterPlanEdit(P.exId, to==='prog' ? 'План сохранён и в программе' : 'План на сегодня изменён');
 }
 function peReset(){
-  const P=peCtx, pl=DB.active.plan; if(!P || !pl || !pl.ov) return;
-  P.ks.forEach(k=>delete pl.ov[k]);
-  syncPlanFix(planCtx()); peCtx=null; devPrompt=null; save(); closeModal();
-  const fe=exByName(exInput.value);
-  if(fe && fe.id===P.exId){ chipSel=null; clearForm(false); renderRecord(); autoFillNext(false); }
-  renderRecord(); renderPlan();
-  toast('План — как в программе', null, null, 2000, 'check');
+  const P=peCtx, pl=DB.active.plan; if(!P || !pl || !Array.isArray(pl.items)) return;
+  const day=findDay(pl.dayId); if(!day) return;
+  const E=peOrigEx(P.exId), src=day.d.items.filter(it=>it.exId===E), have=pl.items.filter(it=>it.exId===E).length;
+  const rows=src.map((it,i)=>({occ:i<have?i:null, v:Object.assign({}, it, {o:{pct:it.pct||null, weight:it.weight==null?null:it.weight, reps:it.reps||null, rmax:it.rmax||null}})}));
+  for(let i=src.length;i<have;i++) rows.push({occ:i, del:true});
+  const res=applyRows(pl.items, E, rows);
+  if(pl.skip){ const sk={}; Object.keys(pl.skip).forEach(i=>{ if(res.map[i]!=null) sk[res.map[i]]=pl.skip[i]; }); pl.skip=sk; }
+  pl.items=res.out;
+  peCtx=null; closeModal();
+  afterPlanEdit(P.exId, 'План — как в программе');
 }
 
 /* ================== УМНЫЙ ПЕРЕСЧЁТ РАБОЧЕГО 1ПМ ==================
@@ -4032,7 +4177,8 @@ function smartReview(x, w){
   const st=planStatus(x), items=x.d.items, recs=recsOfW(w.id), out=[];
   const done=new Set((w.adj||[]).map(a=>a.exId));
   const byEx=new Map();
-  items.forEach((it,k)=>{ if(it.warm || it.test || !it.pct || !it.reps) return; if(!byEx.has(it.exId)) byEx.set(it.exId, []); byEx.get(it.exId).push(k); });
+  const P=it=>it.o || it;                  // план меняли на ходу — сравниваем с исходным
+  items.forEach((it,k)=>{ if(it.warm || it.test || !P(it).pct || !P(it).reps) return; if(!byEx.has(it.exId)) byEx.set(it.exId, []); byEx.get(it.exId).push(k); });
   byEx.forEach((ks, exId)=>{
     if(done.has(exId) || !exById(exId) || exMode(exId)!=='smart') return;
     if(recs.some(r=>r.exId===exId && isTestRec(r))) return;        // сегодня был тест — он и задал 1ПМ
@@ -4040,24 +4186,24 @@ function smartReview(x, w){
     const kb=exBw(exId), body=kb ? bodyNow() : 0;
     const units=[]; let anyRange=false, topOk=true, topLp=0;
     ks.forEach(k=>{
-      const it=items[k], pi=planItem(x,k); if(!pi || pi.weight==null) return;
-      const Lp=pi.weight+(kb && body ? body*kb : 0); if(!(Lp>0)) return;
-      const lo=it.reps, hi=it.rmax||it.reps;
+      const it=items[k], o=P(it), pw=pctWeight(exId, base, o.pct);
+      const Lp=pw+(kb && body ? body*kb : 0); if(!(Lp>0)) return;
+      const lo=o.reps, hi=o.rmax||o.reps;
       const rs=recs.filter(r=>st.byRec.get(r.id)===k && r.exId===exId && !r.warm && !r.t1 && r.reps);
       let n=0;
       rs.forEach(r=>{ const La=loadOf(r); if(!(La>0)) return;
         for(let u=0; u<setUnits(r); u++){ n++;
           const q=e1rm(La, r.reps)/e1rm(Lp, Math.min(Math.max(r.reps, lo), hi));
           units.push({q:Math.min(1.2, Math.max(0.7, q)), down:La<Lp-0.01});
-          if(it.rmax && (r.reps<it.rmax || La<Lp-0.01)) topOk=false;
+          if(o.rmax && (r.reps<o.rmax || La<Lp-0.01)) topOk=false;
         } });
-      if(it.rmax){ anyRange=true; topLp=Math.max(topLp, Lp); if(n<st[k].need) topOk=false; }
+      if(o.rmax){ anyRange=true; topLp=Math.max(topLp, Lp); if(n<st[k].need) topOk=false; }
     });
     if(!units.length) return;
     const avg=units.reduce((a,u)=>a+u.q,0)/units.length, down=units.some(u=>u.down);
     let f=1, why='', info='';
     if(down && avg<0.99){ f=avg; why='снизил вес'; }
-    else if(avg<0.98){ if(exMiss(exId)==='soft'){ f=1-(1-avg)/2; why='недобор повторов'; } else info='недобор повторов — 1ПМ оставлен'; }
+    else if(avg<0.98){ f=1-(1-avg)/2; why='недобор повторов'; }
     else if(anyRange && topOk && topLp>0){ f=Math.max((topLp+exStep(exId))/topLp, avg>1.03 ? 1+Math.min(0.05,(avg-1)/2) : 1); why='верх диапазона — вес +'+fmtNum(exStep(exId))+' кг'; }
     else if(avg>1.03){ f=1+Math.min(0.05,(avg-1)/2); why='больше плана'; }
     f=Math.max(0.9, f);
@@ -4134,6 +4280,7 @@ function applySwap(newId){
   const prog = S.scope==='prog' && !x.tmp && newId!==S.orig;
   if(prog){
     x.p.folders.forEach(f=>f.days.forEach(d=>d.items.forEach(it=>{ if(it.exId===S.orig) it.exId=newId; })));
+    if(Array.isArray(pl.items)) pl.items.forEach(it=>{ if(it.exId===S.orig) it.exId=newId; });
     if(pl.sw) delete pl.sw[S.orig];
   } else {
     pl.sw=pl.sw||{};
@@ -5270,15 +5417,22 @@ document.addEventListener('click', e=>{
     case 'adj-undo':         adjUndo(+el.dataset.w, +el.dataset.i, el); break;
     case 'ex-swap':          openSwap(id); break;
     case 'plan-edit':        openPlanEdit(id); break;
-    case 'pe-unit':          peUnit(+el.dataset.k); break;
+    case 'pe-unit':          peUnit(el); break;
+    case 'pe-del':           peDel(el); break;
+    case 'pe-add':           peAdd(); break;
     case 'pe-save':          peSave(el.dataset.to); break;
     case 'pe-reset':         peReset(); break;
-    case 'dev-yes':          devYes(); break;
+    case 'dev-set':          devSet(el.dataset.w!=null?+el.dataset.w:null, el.dataset.r?+el.dataset.r:null); break;
     case 'dev-no':           devNo(); break;
     case 'swap-scope':       swapScope(el.dataset.v, el); break;
     case 'swap-pick':        applySwap(id); break;
     case 'swap-go':          swapGo(); break;
-    case 'orm-miss':         setOrmMiss(id, el.dataset.v); break;
+    case 'orm-man':          setOrmMan(id, el.dataset.v); break;
+    case 'pct-pick':         openPctPick(); break;
+    case 'pct-set':          pctSet(+el.dataset.w); break;
+    case 'pct-own':          pctOwn(); break;
+    case 'orm-man-open':     ormManShow(id); break;
+    case 'orm-step':         openStepSheet(id); break;
     case 'tm-reset':         tmReset(id); break;
     case 'orm-quick':        ormQuick(id); break;
     case 'pi-more':          togglePiMore(+el.dataset.i); break;
