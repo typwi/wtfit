@@ -884,3 +884,21 @@ button.hs.hs-skip{display:inline-flex;align-items:center;gap:2px;background:tran
   color:var(--muted);padding:12px 2px 4px;font-family:inherit;font-size:14px;cursor:pointer}
 .orm-step-row b{margin-left:auto;color:var(--txt)}
 .pct-own .btn{min-height:46px;margin:0}
+
+/* ===== график рабочего 1ПМ ===== */
+.orm-chart{padding:12px;cursor:pointer}
+.oc-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.oc-head b{color:var(--txt);font-size:15px}
+.oc-d{margin-left:auto;font-weight:700;font-size:12px}
+.oc-d.up{color:var(--ok)} .oc-d.down{color:var(--bad)}
+.oc-svg{width:100%;height:auto;display:block;margin:6px 0 2px}
+.oc-grid{stroke:var(--border);stroke-width:1}
+.oc-ax{fill:var(--muted);font-size:9px;font-family:inherit}
+.oc-line{fill:none;stroke:#4f8cff;stroke-width:2;stroke-linejoin:round}
+.oc-ev{stroke:var(--card);stroke-width:1.5}
+.oc-fact{fill:rgba(158,196,255,.35)}
+.oc-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--muted)}
+.oc-legend span{display:flex;align-items:center;gap:4px}
+.oc-legend i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.oc-legend i.oc-fact-dot{background:rgba(158,196,255,.45)}
+.aw-tag{display:inline-block;font-size:11px;font-weight:700;color:#ffb08f;background:rgba(255,138,92,.12);border-radius:6px;padding:1px 6px}
