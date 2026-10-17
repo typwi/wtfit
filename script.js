@@ -203,11 +203,14 @@ function normalize(d){
   // замены упражнений на сегодня: {исходное: замена}
   const exIds=new Set(out.exercises.map(e=>e.id));
   const swN=o=>{ const r={}; if(o && typeof o==='object') Object.keys(o).forEach(k=>{ const v=+o[k]; if(+k && v && v!==+k && exIds.has(v)) r[+k]=v; }); return r; };
-  if(pday) out.active.plan={dayId:pday.id, fx:normFix(pl, pday), skip:skipN(pl.skip), sw:swN(pl.sw)};
+  // правки пунктов на сегодня: {номер пункта: {pct, weight, reps, rmax, sets}}
+  const ovN=o=>{ const r={}; if(o && typeof o==='object') Object.keys(o).forEach(k=>{ const v=o[k]; if(!(+k>=0) || !v || typeof v!=='object') return;
+    const x={}; ['pct','weight','reps','rmax','sets'].forEach(f=>{ if(f in v) x[f]=v[f]===null ? null : num(v[f]); }); if(Object.keys(x).length) r[+k]=x; }); return r; };
+  if(pday) out.active.plan={dayId:pday.id, fx:normFix(pl, pday), skip:skipN(pl.skip), sw:swN(pl.sw), ov:ovN(pl.ov)};
   else if(out.active.wId && pl && pl.tmp && Array.isArray(pl.tmp.items)){
     // «Повторить тренировку»: план без программы, пункты хранятся прямо в нём
     const tmp={name:cleanName(pl.tmp.name)||'Тренировка', date:+pl.tmp.date||0, items:normItems(pl.tmp.items)};
-    out.active.plan={dayId:0, tmp, fx:normFix(pl, tmp), skip:skipN(pl.skip), sw:swN(pl.sw)};
+    out.active.plan={dayId:0, tmp, fx:normFix(pl, tmp), skip:skipN(pl.skip), sw:swN(pl.sw), ov:ovN(pl.ov)};
   }
   else out.active.plan=null;
   out.workouts.forEach(w=>{
@@ -1162,9 +1165,10 @@ function renderLastHint(){
       }${c.prevSets.map((r,i)=>chip(r,i,(c.cur&&i<c.done?' done':'')+(n.warm===false&&i===n.i?' next':''),'prev')).join('')}</div>`;
   }
   if(c.plan){
-    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}${c.plan.tmp?'Повтор':'Программа'} · <b>${c.plan.done} из ${c.plan.need}</b></div><button type="button" class="swap-btn" data-act="ex-swap" data-id="${ex.id}" aria-label="Заменить упражнение" title="Заменить упражнение">${I('exch','sm')}</button>${sw('plan')}</div>
+    html+=`<div class="hint-row hint-plan-row"><div class="hint-lbl plan">${I('clip','sm')}${c.plan.tmp?'Повтор':'Программа'} · <b>${c.plan.done} из ${c.plan.need}</b></div>${sw('plan')}</div>
+      ${devHtml(ex)}
       <div class="hint-sets">${c.plan.chips.map((ch,i)=>chip(ch.it,i,(ch.warm?' warm':'')+(ch.skip?' skip':ch.done?' done':'')+(i===c.plan.next?' next':''),'plan')).join('')}${c.plan.next>=0 && !c.plan.chips[c.plan.next].done?`<button type="button" class="hs hs-skip" data-act="set-skip" data-i="${c.plan.next}">Пропустить ${I('chev','sm')}</button>`:''}</div>
-      ${(c.plan.pct || c.plan.note || c.plan.rest!=null) ? `<div class="hint-meta">${c.plan.pct?`<button type="button" class="pct-lbl pct-btn" data-act="orm-quick" data-id="${ex.id}" title="Изменить 1ПМ">${fmtNum(c.plan.pct)}% 1ПМ</button>`:''}${c.plan.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(c.plan.rest)}</span>`:''}${c.plan.note?`<button type="button" class="hint-note-line" data-act="hint-note" title="Показать заметку целиком">«${esc(c.plan.note)}»</button>`:''}</div>` : ''}`;
+      ${`<div class="hint-meta">${c.plan.pct?`<button type="button" class="pct-lbl pct-btn" data-act="orm-quick" data-id="${ex.id}" title="Изменить 1ПМ">${fmtNum(c.plan.pct)}% 1ПМ</button>`:''}${c.plan.rest!=null?`<span class="rest-lbl">${I('pause','sm')}${restLabel(c.plan.rest)}</span>`:''}${c.plan.note?`<button type="button" class="hint-note-line" data-act="hint-note" title="Показать заметку целиком">«${esc(c.plan.note)}»</button>`:''}<span class="hint-tools"><button type="button" class="swap-btn" data-act="plan-edit" data-id="${ex.id}" aria-label="Изменить план" title="Изменить план">${I('edit','sm')}</button><button type="button" class="swap-btn" data-act="ex-swap" data-id="${ex.id}" aria-label="Заменить упражнение" title="Заменить упражнение">${I('exch','sm')}</button></span></div>`}`;
   }
   if(!c.prev && c.today && prevOpen){
     html+=`<div class="hint-lbl">Раньше не делали · сегодня <b>${c.done} ${plural(c.done,'рабочий подход','рабочих подхода','рабочих подходов')}</b>${c.warmDone?` + ${c.warmDone} разм.`:''}</div>`;
@@ -1290,6 +1294,9 @@ function saveRecord(){
     if(k<0) k=st.byRec.has(rec.id) ? st.byRec.get(rec.id) : -1;
     if(k<0) px.d.items.forEach((it,i)=>{ if(it.exId===ex.id && !!it.warm===!!rec.warm && st[i].done>0) k=i; });
     if(k>=0 && px.d.items[k].rest!=null) restSec=px.d.items[k].rest;
+    devPrompt=null;
+    if(k>=0){ const st2=planStatus(px), left=st2[k].need-st2[k].done, pi=planItem(px,k);
+      if(left>0 && setDeviates(rec, pi)) devPrompt={k, exId:ex.id, w:rec.weight, r:rec.reps, left, pw:pi.weight, pr:pi.reps, prx:pi.rmax}; }
   }
   if(arMode==='fixed') restSec=lastRest;
   if(arMode!=='off' && DB.active.wId && (reps || weight) && restSec>0){ startRest(restSec, true); autoStarted=true; }
@@ -1331,7 +1338,8 @@ async function stopWorkout(){
   if(!ok || !DB.active.wId) return;
   if(DB.active.restEnd) cancelRest();
   const w=activeW();
-  smartReview(planCtx(), w);               // умный 1ПМ — до того, как план закроется
+  smartReview(planCtx(true), w);           // умный 1ПМ (по исходному плану) — до того, как план закроется
+  devPrompt=null;
   DB.active.wId=null;
   DB.active.plan=null;
   let had=false;
@@ -3645,14 +3653,16 @@ function saveDay(){
   day.name=name; day.items=final;
   dayDraft=null;
   // правка дня, который идёт сейчас: у нетронутых пунктов веса остаются, новые и изменённые считаются заново
-  if(DB.active.plan && DB.active.plan.dayId===day.id){ const x=planCtx(); if(x) syncPlanFix(x); DB.active.plan.skip={}; }
+  if(DB.active.plan && DB.active.plan.dayId===day.id){ DB.active.plan.skip={}; DB.active.plan.ov={}; const x=planCtx(); if(x) syncPlanFix(x); }
   save(); refresh(); openDay(day.id);
   toast('Сохранено', null, null, null, 'check');
   checkOrmNeeded(day.items);
 }
 
 /* ================== ТРЕНИРОВКА ПО ПРОГРАММЕ (экран «Запись») ================== */
-function planCtx(){
+/* noOv — без правок на сегодня (умный пересчёт сравнивает с исходным планом: решил сделать 80% вместо 70%
+   или снизил вес — это сигнал для рабочего 1ПМ). */
+function planCtx(noOv){
   const pl=DB.active.plan;
   if(!pl || !DB.active.wId) return null;
   let x = pl.tmp ? {p:{name:'Повтор'}, f:{name:pl.tmp.date?fmtDate(pl.tmp.date):''}, d:{id:0, name:pl.tmp.name, items:pl.tmp.items}, tmp:true} : findDay(pl.dayId);
@@ -3660,6 +3670,10 @@ function planCtx(){
   const sw=pl.sw;
   if(x && sw && Object.keys(sw).length)
     x=Object.assign({}, x, {d:Object.assign({}, x.d, {items:x.d.items.map(it=>sw[it.exId] ? Object.assign({}, it, {exId:sw[it.exId], swFrom:it.exId}) : it)})});
+  // правки пунктов на сегодня (окно «План» или «оставшиеся подходы — так же»)
+  const ov=!noOv && pl.ov;
+  if(x && ov && Object.keys(ov).length)
+    x=Object.assign({}, x, {d:Object.assign({}, x.d, {items:x.d.items.map((it,k)=>ov[k] ? Object.assign({}, it, ov[k], {ovr:true}) : it)})});
   return x;
 }
 /* Выполнение плана по подходам. Каждый записанный подход (по времени) засчитывается в пункт того же
@@ -3748,7 +3762,7 @@ function renderPlan(){
     ${planFolded ? '' : dayRuns(x.d.items).map((g,gi)=>{ const e=exById(x.d.items[g.idx[0]].exId);
       const allOk=g.idx.every(i=>st[i].ok);
       const from=x.d.items[g.idx[0]].swFrom, fe=from && exById(from);
-      return `<div class="pg pg-plan">${grpHead(gi+1, (e?e.name:'?')+(fe?' · вместо «'+fe.name+'»':''), allOk?' done':'', '', allOk||!e?'':`<button type="button" class="pg-swap" data-act="ex-swap" data-id="${e.id}" aria-label="Заменить упражнение">${I('exch','sm')}</button>`)}
+      return `<div class="pg pg-plan">${grpHead(gi+1, (e?e.name:'?')+(fe?' · вместо «'+fe.name+'»':''), allOk?' done':'', '', !e?'':`<button type="button" class="pg-swap" data-act="plan-edit" data-id="${e.id}" aria-label="Изменить план">${I('edit','sm')}</button>${allOk?'':`<button type="button" class="pg-swap" data-act="ex-swap" data-id="${e.id}" aria-label="Заменить упражнение">${I('exch','sm')}</button>`}`)}
         ${g.idx.map(i=>{ const it=x.d.items[i], s=st[i], part=!s.ok && s.done>0;
         return `<div class="plan-row pg-row${s.ok?' done':''}${i===next?' next':''}${it.warm?' warm':''}" data-act="plan-fill" data-i="${i}">
           <span class="plan-mark${part?' part':''}">${s.ok?I('check'):part?`${s.done}/${s.need}`:(i+1)}</span>
@@ -3846,7 +3860,7 @@ function skipSet(i){
 }
 async function closePlan(){
   if(DB.active.wId && !await ask('Убрать программу с экрана? Тренировка продолжится, но подсказки и автоподстановка по программе пропадут.','Убрать')) return;
-  const adj=smartReview(planCtx(), activeW()).filter(a=>!a.info);
+  const adj=smartReview(planCtx(true), activeW()).filter(a=>!a.info);
   DB.active.plan=null; save(); renderPlan();
   toast('Программа скрыта — тренировка продолжается'+(adj.length?' · рабочий 1ПМ: '+adj.map(a=>{ const e=exById(a.exId); return (e?e.name:'?')+' '+fmtNum(a.from)+'→'+fmtNum(a.to); }).join(', '):''), null, null, adj.length?5000:null);
 }
@@ -3880,6 +3894,124 @@ function fillFromPlan(i, noScroll){
     const sc=$('#scroller'), fc=$('.form-card');
     sc.scrollBy({top:fc.getBoundingClientRect().top - sc.getBoundingClientRect().top - 64, behavior:'smooth'});
   }catch(err){}
+}
+
+/* ================== ПЛАН НА ХОДУ ==================
+   Подход сделан не так, как в пункте (другой вес или повторы вне плана/диапазона), а подходы пункта ещё
+   остались — под упражнением вопрос «оставшиеся — так же?». «Да» — правка пункта на сегодня (вес в кг,
+   повторы), автоподстановка дальше даёт её. Окно «План» (✎) — поменять пункты упражнения на ходу: % или кг,
+   повторы, диапазон, подходы — на сегодня или сразу в программе. Правки на сегодня лежат в DB.active.plan.ov. */
+let devPrompt=null;
+function setDeviates(r, pi){
+  if(!pi) return false;
+  if(r.weight!=null && (pi.weight==null || Math.abs((r.weight||0)-(pi.weight||0))>0.01)) return true;
+  if(r.weight==null && pi.weight) return true;
+  const lo=pi.reps, hi=pi.rmax||pi.reps;
+  return !!(lo && r.reps && (r.reps<lo || r.reps>hi));
+}
+function devHtml(ex){
+  const d=devPrompt; if(!d || d.exId!==ex.id || !planCtx()) return '';
+  const lbl=(w,r,rx)=>`${w!=null?wTxt(w,ex.id):'—'}×${r?fmtNum(r)+(rx?'–'+fmtNum(rx):''):'—'}`;
+  return `<div class="dev-row"><span class="dev-txt">Сделал <b>${lbl(d.w,d.r)}</b> вместо ${lbl(d.pw,d.pr,d.prx)}. Оставшиеся ${d.left} ${plural(d.left,'подход','подхода','подходов')} — так же?</span>
+    <button type="button" class="dev-btn yes" data-act="dev-yes">Да</button><button type="button" class="dev-btn" data-act="dev-no">Нет</button></div>`;
+}
+function devYes(){
+  const d=devPrompt, pl=DB.active.plan; devPrompt=null;
+  if(!d || !pl) return;
+  const x=planCtx(), it=x && x.d.items[d.k]; if(!it) return;
+  const o=Object.assign({}, (pl.ov||{})[d.k]||{});
+  const pw=planItem(x,d.k).weight;
+  if(d.w!=null && (pw==null || Math.abs(d.w-pw)>0.01)){ o.pct=null; o.weight=d.w; }
+  if(d.r && (!it.reps || d.r<it.reps || d.r>(it.rmax||it.reps))){ o.reps=d.r; o.rmax=null; }
+  pl.ov=pl.ov||{}; pl.ov[d.k]=o;
+  syncPlanFix(planCtx()); save();
+  chipSel=null; clearForm(false); renderRecord(); autoFillNext(false); renderPlan();
+  toast('Оставшиеся подходы — '+(d.w!=null?wTxt(d.w,d.exId)+'×':'')+(d.r||'—'), null, null, 2200, 'check');
+}
+function devNo(){ devPrompt=null; renderLastHint(); }
+
+let peCtx=null;
+function openPlanEdit(exId){
+  const x=planCtx(); if(!x) return;
+  const st=planStatus(x), ks=x.d.items.map((it,k)=>k).filter(k=>x.d.items[k].exId===exId);
+  const ex=exById(exId); if(!ex || !ks.length) return;
+  const base=workOrm(exId), pl=DB.active.plan;
+  peCtx={exId, ks};
+  const row=k=>{ const it=x.d.items[k], s=st[k], pct=!!it.pct;
+    const calc = pct ? (base ? '≈ '+wTxt(pctWeight(exId, base, it.pct), exId)+' кг' : 'нет 1ПМ') : '';
+    return `<div class="pe-row${it.warm?' warm':''}" data-k="${k}">
+      <div class="pe-head"><span class="plan-mark">${k+1}</span>${it.warm?WARM_TAG:''}${it.test?'<span class="test-tag">тест 1ПМ</span>':''}<span class="muted pe-done">сделано ${s.done} из ${s.need}</span>${pl.ov&&pl.ov[k]?'<span class="pe-ov">изменён</span>':''}</div>
+      <div class="pi-grid pe-grid">
+        <label class="pi-l"><span class="pi-wl">Вес <button type="button" class="pi-unit${pct?' pct':''}" data-act="pe-unit" data-k="${k}">${pct?'% 1ПМ':'кг'}</button></span><input class="pe-w" inputmode="decimal" value="${esc(inVal(pct?it.pct:it.weight))}" placeholder="—" autocomplete="off"><span class="pi-calc pe-calc">${esc(calc)}</span></label>
+        <label class="pi-l">Повторы<input class="pe-r" inputmode="numeric" value="${esc(inVal(it.reps))}" placeholder="—" autocomplete="off"></label>
+        <label class="pi-l">Подходы<input class="pe-s" inputmode="numeric" value="${esc(inVal(it.sets))}" placeholder="—" autocomplete="off"></label>
+      </div>
+      ${it.warm?'':`<label class="pi-l pe-rx-l">Повторы до (диапазон)<input class="pe-rx" inputmode="numeric" value="${esc(inVal(it.rmax))}" placeholder="—" autocomplete="off"></label>`}
+    </div>`; };
+  const anyOv=ks.some(k=>pl.ov && pl.ov[k]);
+  openModal(`<div class="sheet-head"><h2>План · ${esc(ex.name)}</h2>${closeX()}</div>
+    <p class="muted">Меняй на ходу: % или кг, повторы, подходы. Рабочий 1ПМ после тренировки считается по исходному плану — решил сделать тяжелее или легче, это тоже учтётся.</p>
+    ${ks.map(row).join('')}
+    <button class="btn big" data-act="pe-save" data-to="day">${I('check')}Применить на сегодня</button>
+    ${x.tmp?'':`<button class="btn ghost big" data-act="pe-save" data-to="prog">${I('save')}Сохранить и в программе</button>`}
+    ${anyOv?`<button class="btn ghost big" data-act="pe-reset">${I('swap')}Вернуть как в программе</button>`:''}`);
+}
+// % ↔ кг в окне «План»: значение пересчитывается от рабочего 1ПМ
+function peUnit(k){
+  const el=$(`.pe-row[data-k="${k}"]`), btn=el && el.querySelector('.pi-unit'); if(!el || !peCtx) return;
+  const exId=peCtx.exId, base=workOrm(exId), inp=el.querySelector('.pe-w'), v=num(inp.value), toPct=!btn.classList.contains('pct');
+  if(toPct && !base){ toast('1ПМ для этого упражнения пока нет — оставьте вес в кг'); return; }
+  btn.classList.toggle('pct', toPct); btn.textContent=toPct?'% 1ПМ':'кг';
+  if(v && base) inp.value=inVal(toPct ? Math.round((v+(exBw(exId)?bodyNow()*exBw(exId):0))/base*100) : pctWeight(exId, base, v));
+  peCalc(el);
+}
+function peCalc(el){
+  const c=el.querySelector('.pe-calc'), pct=el.querySelector('.pi-unit').classList.contains('pct'), v=num(el.querySelector('.pe-w').value);
+  if(!c || !peCtx) return;
+  const base=workOrm(peCtx.exId);
+  c.textContent = pct ? (base ? (v ? '≈ '+wTxt(pctWeight(peCtx.exId, base, v), peCtx.exId)+' кг' : '') : 'нет 1ПМ') : '';
+}
+document.addEventListener('input', e=>{ if(e.target.matches && e.target.matches('.pe-w')) peCalc(e.target.closest('.pe-row')); });
+function peSave(to){
+  const P=peCtx, pl=DB.active.plan, x=planCtx(); if(!P || !pl || !x) return;
+  const raw=planCtx(true), day=(to==='prog' && !x.tmp) ? findDay(pl.dayId) : null;
+  const vals=[]; let bad=false;
+  P.ks.forEach(k=>{
+    const el=$(`.pe-row[data-k="${k}"]`); if(!el) return;
+    const g=c=>{ const i=el.querySelector(c); return i ? i.value : ''; };
+    const pct=el.querySelector('.pi-unit').classList.contains('pct');
+    const w=num(g('.pe-w')), r=num(g('.pe-r')), sN=num(g('.pe-s')), rx=num(g('.pe-rx'));
+    const bw=exBw(P.exId);
+    const bW = w!=null && (pct ? (w<=0 || w>200) : (w>LIMITS.weight || (w<0 && !bw)));
+    const bR = r!=null && (r<0 || r>LIMITS.reps), bS = sN!=null && (sN<1 || sN>100 || Math.round(sN)!==sN), bX = rx!=null && !(r && rx>r && rx<=LIMITS.reps);
+    [['.pe-w',bW],['.pe-r',bR],['.pe-s',bS],['.pe-rx',bX]].forEach(([c,b])=>{ const i=el.querySelector(c); if(i) markBad(i,b); });
+    if(bW||bR||bS||bX){ bad=true; return; }
+    vals.push({k, v:{pct:pct?w:null, weight:pct?null:w, reps:r, rmax:rx||null, sets:sN}});
+  });
+  if(bad){ toast('Проверьте выделенные поля: % — до 200, подходы — целое от 1, «до» — больше повторов', null, null, 3500, 'alert'); return; }
+  pl.ov=pl.ov||{};
+  vals.forEach(({k,v})=>{
+    if(day){ const it=day.d.items[k]; if(it){ Object.assign(it, v); delete pl.ov[k]; } return; }
+    // на сегодня: храним только отличия от исходного пункта
+    const o=raw.d.items[k], d={};
+    Object.keys(v).forEach(f=>{ if((o[f]==null?null:o[f])!==(v[f]==null?null:v[f])) d[f]=v[f]; });
+    if(Object.keys(d).length) pl.ov[k]=d; else delete pl.ov[k];
+  });
+  syncPlanFix(planCtx()); peCtx=null; devPrompt=null;
+  save(); closeModal();
+  const fe=exByName(exInput.value);
+  if(fe && fe.id===P.exId){ chipSel=null; clearForm(false); renderRecord(); autoFillNext(false); }
+  renderRecord(); renderPlan();
+  toast(day ? 'План сохранён в программе' : 'План на сегодня изменён', null, null, 2200, 'check');
+}
+function peReset(){
+  const P=peCtx, pl=DB.active.plan; if(!P || !pl || !pl.ov) return;
+  P.ks.forEach(k=>delete pl.ov[k]);
+  syncPlanFix(planCtx()); peCtx=null; devPrompt=null; save(); closeModal();
+  const fe=exByName(exInput.value);
+  if(fe && fe.id===P.exId){ chipSel=null; clearForm(false); renderRecord(); autoFillNext(false); }
+  renderRecord(); renderPlan();
+  toast('План — как в программе', null, null, 2000, 'check');
 }
 
 /* ================== УМНЫЙ ПЕРЕСЧЁТ РАБОЧЕГО 1ПМ ==================
@@ -5137,6 +5269,12 @@ document.addEventListener('click', e=>{
     case 'orm-mode':         setOrmMode(id, el.dataset.v); break;
     case 'adj-undo':         adjUndo(+el.dataset.w, +el.dataset.i, el); break;
     case 'ex-swap':          openSwap(id); break;
+    case 'plan-edit':        openPlanEdit(id); break;
+    case 'pe-unit':          peUnit(+el.dataset.k); break;
+    case 'pe-save':          peSave(el.dataset.to); break;
+    case 'pe-reset':         peReset(); break;
+    case 'dev-yes':          devYes(); break;
+    case 'dev-no':           devNo(); break;
     case 'swap-scope':       swapScope(el.dataset.v, el); break;
     case 'swap-pick':        applySwap(id); break;
     case 'swap-go':          swapGo(); break;

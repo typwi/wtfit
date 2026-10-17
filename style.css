@@ -840,3 +840,23 @@ button.hs.hs-skip{display:inline-flex;align-items:center;gap:2px;background:tran
 .adj-undo{flex:none;background:none;border:1px solid var(--border);color:var(--accent);border-radius:8px;padding:4px 9px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
 .adj-st{flex:none;font-size:12px;color:var(--muted)}
 .adj-row.undone .adj-main{color:var(--muted);text-decoration:line-through}
+
+/* ===== план на ходу ===== */
+.dev-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;padding:8px 10px;border-radius:10px;
+  background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.35);font-size:13px;line-height:1.35}
+.dev-txt{flex:1 1 180px;min-width:0}
+.dev-btn{flex:none;background:var(--card);border:1px solid var(--border);color:var(--txt);border-radius:8px;padding:6px 12px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.dev-btn.yes{background:var(--accent);border-color:var(--accent);color:#fff}
+.dev-btn:active{opacity:.6}
+.pe-row{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:8px}
+.pe-row.warm{border-color:rgba(255,138,92,.35)}
+.pe-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px}
+.pe-head .plan-mark{width:24px;height:24px;font-size:12px}
+.pe-done{margin-left:auto;font-size:12px}
+.pe-ov{font-size:11px;font-weight:700;color:#ffb020;background:rgba(255,176,32,.12);border-radius:6px;padding:1px 6px}
+.pe-grid{margin:8px 0 4px}
+.pe-rx-l{display:block;text-align:left;margin:2px 0 0}
+.pe-rx-l input{width:100px;display:inline-block;margin-left:8px}
+.hint-tools{flex:none;display:flex;gap:6px;margin-left:auto;align-self:center}
+.hint-tools .swap-btn{margin:0}
+.pe-head .plan-mark{background:var(--card)}
